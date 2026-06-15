@@ -1,4 +1,6 @@
-# Class-Management-Score
+# 校园班级管理分
+
+
 适用于校园班级（整体）周流动分管理网站
 注意该项目使用deepseek制作可能会有很多BUG，目前已知显示不正常但是不影响使用。
 注意该项目使用deepseek制作
