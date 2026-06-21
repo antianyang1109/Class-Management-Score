@@ -32,6 +32,8 @@ CREATE TABLE `admins` (
   `class_id` int(11) DEFAULT NULL COMMENT '班主任所属班级',
   `failed_attempts` int(11) NOT NULL DEFAULT 0,
   `lock_until` datetime DEFAULT NULL,
+  `security_question` varchar(255) DEFAULT NULL COMMENT '密保问题',
+  `security_answer_hash` varchar(255) DEFAULT NULL COMMENT '密保答案哈希',
   `created_at` timestamp NOT NULL DEFAULT CURRENT_TIMESTAMP,
   PRIMARY KEY (`id`),
   UNIQUE KEY `username` (`username`),
@@ -56,6 +58,7 @@ CREATE TABLE `reward_punish_types` (
   `id` int(11) NOT NULL AUTO_INCREMENT,
   `name` varchar(100) NOT NULL,
   `type` enum('reward','punish') NOT NULL,
+  `category` varchar(50) DEFAULT NULL COMMENT '分类（如：卫生、纪律）',
   `default_points` decimal(5,1) NOT NULL DEFAULT 0.0,
   `is_builtin` tinyint(1) NOT NULL DEFAULT 0 COMMENT '是否为内置类型',
   PRIMARY KEY (`id`)
@@ -69,6 +72,7 @@ CREATE TABLE `score_records` (
   `points` decimal(5,1) NOT NULL COMMENT '实际使用的分值（可临时调整）',
   `admin_id` int(11) NOT NULL,
   `note` text,
+  `image_path` varchar(255) DEFAULT NULL COMMENT '截图路径',
   `semester_id` int(11) NOT NULL,
   `week_number` int(11) NOT NULL COMMENT '学期内的周次',
   `month_number` int(11) NOT NULL COMMENT '学期内的月次',
@@ -110,3 +114,15 @@ INSERT INTO `reward_punish_types` (`name`, `type`, `default_points`, `is_builtin
 ('违纪行为', 'punish', -3.0, 1),
 ('好人好事', 'reward', 3.0, 1),
 ('课堂表现优秀', 'reward', 2.0, 1);
+
+-- ============================================
+-- 已有数据库升级脚本（如果是从旧版本升级）
+-- 运行以下 SQL 添加缺失字段：
+-- ============================================
+-- ALTER TABLE `admins`
+--   ADD COLUMN `security_question` varchar(255) DEFAULT NULL COMMENT '密保问题' AFTER `lock_until`,
+--   ADD COLUMN `security_answer_hash` varchar(255) DEFAULT NULL COMMENT '密保答案哈希' AFTER `security_question`;
+-- ALTER TABLE `score_records`
+--   ADD COLUMN `image_path` varchar(255) DEFAULT NULL COMMENT '截图路径' AFTER `note`;
+-- ALTER TABLE `reward_punish_types`
+--   ADD COLUMN `category` varchar(50) DEFAULT NULL COMMENT '分类（如：卫生、纪律）' AFTER `type`;

@@ -1,7 +1,7 @@
 <?php
 require_once 'config.php';
 requireLogin();
-if ($_SESSION['role'] !== 'super_admin') die('权限不足');
+if ($_SESSION['role'] !== 'super_admin') { http_response_code(403); die('权限不足喵'); }
 
 if ($_GET['action'] === 'export') {
     $tables = ['grades','classes','admins','semesters','reward_punish_types','score_records','admin_logs'];
@@ -20,6 +20,6 @@ if ($_GET['action'] === 'export') {
     header('Content-Type: application/sql');
     header('Content-Disposition: attachment; filename="backup_'.date('YmdHis').'.sql"');
     echo $sql;
-    logAction('导出数据库备份');
+    logAction('导出数据库备份喵');
     exit;
 }

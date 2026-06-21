@@ -1,10 +1,20 @@
-<?php require_once 'config.php'; ?>
+<?php
+require_once 'config.php';
+
+// 如果系统未初始化，跳转到安装页面
+if (!isSystemInitialized()) {
+    header('Location: install.php');
+    exit;
+}
+?>
 <!DOCTYPE html>
 <html lang="zh-CN">
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=yes">
     <title>班级积分系统 - 登录</title>
+    <link rel="icon" type="image/x-icon" href="favicon.ico">
+    <link rel="shortcut icon" type="image/x-icon" href="favicon.ico">
     <link rel="stylesheet" href="style.css">
 </head>
 <body class="login-body">
@@ -12,6 +22,11 @@
         <h2>🎓 班级积分管理</h2>
         <?php
         if ($_SERVER['REQUEST_METHOD'] === 'POST') {
+            // CSRF 验证
+            $csrfToken = $_POST['csrf_token'] ?? '';
+            if (empty($_SESSION['csrf_token']) || !hash_equals($_SESSION['csrf_token'], $csrfToken)) {
+                $error = "CSRF 验证失败，请刷新页面后重试";
+            } else {
             $username = trim($_POST['username'] ?? '');
             $password = $_POST['password'] ?? '';
             
@@ -28,6 +43,13 @@
                     if (password_verify($password, $admin['password_hash'])) {
                         // 重置失败次数
                         $pdo->prepare("UPDATE admins SET failed_attempts = 0, lock_until = NULL WHERE id = ?")->execute([$admin['id']]);
+                        // 如果用户启用了二次验证，先跳转到验证页面
+                        if (!empty($admin['totp_secret'])) {
+                            $_SESSION['pending_2fa_admin_id'] = $admin['id'];
+                            $_SESSION['pending_2fa_username'] = $admin['username'];
+                            header('Location: totp_verify.php');
+                            exit;
+                        }
                         $_SESSION['admin_id'] = $admin['id'];
                         $_SESSION['username'] = $admin['username'];
                         $_SESSION['role'] = $admin['role'];
@@ -51,15 +73,20 @@
             } else {
                 $error = "用户不存在";
             }
+            } // end CSRF else
         }
         ?>
         <?php if (isset($error)) echo "<div class='error-msg'>$error</div>"; ?>
         <form method="post">
+            <?= csrfField() ?>
             <input type="text" name="username" placeholder="用户名" required>
             <input type="password" name="password" placeholder="密码" required>
             <button type="submit">登 录</button>
         </form>
-<div style="text-align:center; margin-top:1rem;">
+        <div style="text-align:center; margin-top:0.8rem;">
+            <a href="install.php?action=reset" style="color:#64748b; font-size:0.8rem; text-decoration:underline;">忘记密码？</a>
+        </div>
+<div style="text-align:center; margin-top:0.5rem;">
     <a href="dashboard.php" style="color:#1e3c72; text-decoration:underline;">👀 游客查看（无需登录）</a>
 </div>
         <div class="pw-hint">密码至少8位，包含大小写字母和数字</div>
