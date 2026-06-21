@@ -9,8 +9,7 @@
 ## 一、部署与使用说明  
 1.环境要求：PHP 7.4+，MySQL 5.7+，启用 PDO。  
 导入数据库：将 database.sql 导入 MySQL。  
-配置连接：修改 config.php 中的数据库用户名、密码。  
-创建超级管理员：手动在 admins 表插入一条记录，密码使用 password_hash('YourPass123', PASSWORD_DEFAULT) 生成，角色设为 super_admin。（对的，目前这个版本第一次使用要手动生成密码哈希值导入MySQL，看看下一个版本能不能解决这个问题）  
+配置连接：修改 config.php 中的数据库用户名、密码。   
 访问系统：将文件部署到 Web 服务器，访问 index.php 登录。
 ***
 ## 核心功能覆盖清单  
