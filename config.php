@@ -163,12 +163,18 @@ function logAction($action, $target_type = null, $target_id = null, $details = n
 }
 
 /**
- * 计算当前日期属于学期内的第几周（自然周，周一为一周起始）
+ * 计算指定日期属于学期内的第几周（自然周，周一为一周起始）
+ * @param string $semesterStartDate 学期开始日期
+ * @param string|null $refDate 参考日期（Y-m-d 或 Y-m-d H:i:s），默认今天
  */
-function getWeekNumber($semesterStartDate) {
+function getWeekNumber($semesterStartDate, $refDate = null) {
     $tz = new DateTimeZone('Asia/Shanghai');
     $start = new DateTime($semesterStartDate, $tz);
-    $now = new DateTime('now', $tz);
+    if ($refDate) {
+        $now = new DateTime($refDate, $tz);
+    } else {
+        $now = new DateTime('now', $tz);
+    }
 
     // 找到学期开始日所在周的周一
     $startWeekMonday = clone $start;
@@ -178,7 +184,7 @@ function getWeekNumber($semesterStartDate) {
     }
     $startWeekMonday->setTime(0, 0, 0);
 
-    // 找到当前日期所在周的周一
+    // 找到参考日期所在周的周一
     $currentWeekMonday = clone $now;
     $currentDayOfWeek = (int)$now->format('N');
     if ($currentDayOfWeek > 1) {
@@ -194,12 +200,18 @@ function getWeekNumber($semesterStartDate) {
 }
 
 /**
- * 计算当前日期属于学期内的第几月（基于日历月差，修正原30天粗略算法）
+ * 计算指定日期属于学期内的第几月（基于日历月差，修正原30天粗略算法）
+ * @param string $semesterStartDate 学期开始日期
+ * @param string|null $refDate 参考日期（Y-m-d 或 Y-m-d H:i:s），默认今天
  */
-function getMonthNumber($semesterStartDate) {
+function getMonthNumber($semesterStartDate, $refDate = null) {
     $tz = new DateTimeZone('Asia/Shanghai');
     $start = new DateTime($semesterStartDate, $tz);
-    $now = new DateTime('now', $tz);
+    if ($refDate) {
+        $now = new DateTime($refDate, $tz);
+    } else {
+        $now = new DateTime('now', $tz);
+    }
     $diff = $start->diff($now);
     $month = $diff->y * 12 + $diff->m + 1; // 当月为第1月
     return max(1, $month);

@@ -72,6 +72,10 @@ if ($tab === 'quick' && canOperateScore()) {
                 </select>
             </div>
             <div style="margin-bottom:0.8rem;">
+                <label>积分日期喵（默认今天）</label>
+                <input type="date" name="score_date" id="score-date-input" value="<?= date('Y-m-d') ?>">
+            </div>
+            <div style="margin-bottom:0.8rem;">
                 <label>奖惩大类喵</label>
                 <select id="type-category" onchange="switchTypeCategory()">
                     <option value="punish">惩罚喵</option>
@@ -119,6 +123,17 @@ if ($tab === 'records') {
                     <option value="<?= $c['id'] ?>"><?= htmlspecialchars($c['grade_name'].' '.$c['name']) ?></option>
                 <?php endforeach; ?>
             </select>
+            <select id="filter-type" onchange="loadRecords()">
+                <option value="">全部类型</option>
+                <option value="punish">仅扣分</option>
+                <option value="reward">仅加分</option>
+            </select>
+            <div class="date-range-group">
+                <input type="date" id="filter-date-from" onchange="loadRecords()">
+                <span>~</span>
+                <input type="date" id="filter-date-to" onchange="loadRecords()">
+            </div>
+            <button class="btn" onclick="resetRecordFilters()">重置筛选</button>
             <?php if ($canExport): ?>
                 <button class="btn" onclick="exportRecords()">📥 导出记录</button>
             <?php endif; ?>
@@ -128,14 +143,37 @@ if ($tab === 'records') {
     <script>
         async function loadRecords() {
             const classId = document.getElementById('filter-class').value;
-            const res = await fetch(`api.php?action=get_records&class_id=${classId}`);
+            const type = document.getElementById('filter-type').value;
+            const dateFrom = document.getElementById('filter-date-from').value;
+            const dateTo = document.getElementById('filter-date-to').value;
+            const params = new URLSearchParams();
+            params.append('action', 'get_records');
+            if (classId) params.append('class_id', classId);
+            if (type) params.append('score_type', type);
+            if (dateFrom) params.append('date_from', dateFrom);
+            if (dateTo) params.append('date_to', dateTo);
+            const res = await fetch('api.php?' + params.toString());
             document.getElementById('records-list').innerHTML = await res.text();
+        }
+        function resetRecordFilters() {
+            document.getElementById('filter-class').value = '';
+            document.getElementById('filter-type').value = '';
+            document.getElementById('filter-date-from').value = '';
+            document.getElementById('filter-date-to').value = '';
+            loadRecords();
         }
         function exportRecords() {
             const classId = document.getElementById('filter-class').value;
-            let url = 'api.php?action=export_records';
-            if (classId) url += '&class_id=' + classId;
-            window.location.href = url;
+            const type = document.getElementById('filter-type').value;
+            const dateFrom = document.getElementById('filter-date-from').value;
+            const dateTo = document.getElementById('filter-date-to').value;
+            const params = new URLSearchParams();
+            params.append('action', 'export_records');
+            if (classId) params.append('class_id', classId);
+            if (type) params.append('score_type', type);
+            if (dateFrom) params.append('date_from', dateFrom);
+            if (dateTo) params.append('date_to', dateTo);
+            window.location.href = 'api.php?' + params.toString();
         }
         loadRecords();
     </script>
@@ -150,10 +188,11 @@ if ($tab === 'ranking') {
     <div class="card">
         <h3>🏆 排行榜</h3>
         <div class="filter-bar">
-            <select id="period-select" onchange="loadRanking()">
+            <select id="period-select" onchange="toggleCustomDateRange(); loadRanking();">
                 <option value="week" <?= $period=='week'?'selected':'' ?>>周榜</option>
                 <option value="month" <?= $period=='month'?'selected':'' ?>>月榜</option>
                 <option value="semester" <?= $period=='semester'?'selected':'' ?>>学期榜</option>
+                <option value="custom">自定义时间范围</option>
             </select>
             <select id="grade-filter" onchange="loadRanking()">
                 <option value="">所有年级</option>
@@ -162,14 +201,42 @@ if ($tab === 'ranking') {
                 foreach ($grades as $g) echo "<option value='".(int)$g['id']."'>".htmlspecialchars($g['name'], ENT_QUOTES)."</option>";
                 ?>
             </select>
+            <select id="score-type-filter" onchange="loadRanking()">
+                <option value="">综合排行（总分）</option>
+                <option value="punish">仅扣分排行</option>
+                <option value="reward">仅加分排行</option>
+            </select>
+        </div>
+        <div class="filter-bar" id="custom-date-bar" style="display:none; margin-top:0.3rem; border-top:1px dashed #e2e8f0; padding-top:0.5rem;">
+            <div class="date-range-group">
+                <input type="date" id="ranking-date-from" onchange="loadRanking()">
+                <span>~</span>
+                <input type="date" id="ranking-date-to" onchange="loadRanking()">
+            </div>
         </div>
         <div id="ranking-content"></div>
     </div>
     <script>
+        function toggleCustomDateRange() {
+            const period = document.getElementById('period-select').value;
+            document.getElementById('custom-date-bar').style.display = (period === 'custom') ? 'flex' : 'none';
+        }
         async function loadRanking() {
             const period = document.getElementById('period-select').value;
             const grade = document.getElementById('grade-filter').value;
-            const res = await fetch(`api.php?action=ranking&period=${period}&grade_id=${grade}`);
+            const scoreType = document.getElementById('score-type-filter').value;
+            const params = new URLSearchParams();
+            params.append('action', 'ranking');
+            params.append('period', period);
+            if (grade) params.append('grade_id', grade);
+            if (scoreType) params.append('score_type', scoreType);
+            if (period === 'custom') {
+                const df = document.getElementById('ranking-date-from').value;
+                const dt = document.getElementById('ranking-date-to').value;
+                if (df) params.append('date_from', df);
+                if (dt) params.append('date_to', dt);
+            }
+            const res = await fetch('api.php?' + params.toString());
             document.getElementById('ranking-content').innerHTML = await res.text();
         }
         loadRanking();
@@ -216,6 +283,15 @@ if ($tab === 'admin' && canOperateSystem()) {
                 <input type="file" name="backup_file" accept=".sql">
                 <div class="btn-row"><button type="button" class="btn" onclick="restoreBackup()">恢复喵</button></div>
             </form>
+        </div>
+        <div class="card">
+            <h3>🎓 年级管理喵</h3>
+            <form id="grade-form">
+                <input type="text" name="grade_name" placeholder="年级名称喵（如：七年级）" required>
+                <div class="btn-row"><button type="button" class="btn" onclick="addGrade()">添加年级喵</button></div>
+            </form>
+            <hr>
+            <div id="grade-list"></div>
         </div>
         <div class="card">
             <h3>🏷️ 自定义奖惩类型喵</h3>
@@ -320,6 +396,26 @@ if ($tab === 'admin' && canOperateSystem()) {
             const res = await fetch('api.php?action=get_semesters');
             document.getElementById('semester-list').innerHTML = await res.text();
         }
+        async function addGrade() {
+            const form = document.getElementById('grade-form');
+            const fd = new FormData(form);
+            const res = await apiPost('add_grade', Object.fromEntries(fd.entries()));
+            alert(await res.text());
+            loadGrades();
+            // 刷新班级管理中的年级下拉
+            loadClassGradeOptions();
+        }
+        async function loadGrades() {
+            const res = await fetch('api.php?action=get_grades');
+            document.getElementById('grade-list').innerHTML = await res.text();
+        }
+        // 刷新班级管理中年级下拉框（添加年级后调用）
+        async function loadClassGradeOptions() {
+            const classGradeSelect = document.querySelector('#class-form select[name="grade_id"]');
+            if (!classGradeSelect) return;
+            const res = await fetch('api.php?action=get_grades_select');
+            if (res.ok) classGradeSelect.innerHTML = await res.text();
+        }
         async function addType() {
             const form = document.getElementById('type-form');
             const fd = new FormData(form);
@@ -349,6 +445,7 @@ if ($tab === 'admin' && canOperateSystem()) {
             document.getElementById('class-list').innerHTML = await res.text();
         }
         loadSemesters();
+        loadGrades();
         loadTypes();
         loadClasses();
         loadTotpStatus();
@@ -455,7 +552,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
 
     // ====== 权限检查（新角色逻辑）======
     $scoreOps = ['add_score', 'delete_record', 'import_classes'];
-    $systemOps = ['add_semester', 'add_type', 'add_class', 'restore',
+    $systemOps = ['add_semester', 'add_type', 'add_class', 'add_grade', 'delete_grade', 'restore',
                   'set_current_semester', 'delete_class', 'freeze_class', 'unfreeze_class', 'delete_type'];
     $loginOnlyOps = array_merge($scoreOps, $systemOps, ['totp_enable', 'totp_disable']);
 
@@ -469,7 +566,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         http_response_code(403); die("权限不足喵，无系统运维权限");
     }
 
-    // 添加积分记录
+    // 添加积分记录（支持自定义积分日期）
     if ($postAction === 'add_score') {
         $semester = getCurrentSemester();
         if (!$semester) { http_response_code(400); die("❌ 请先设置当前学期喵。"); }
@@ -482,6 +579,24 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
 
         $points = floatval($_POST['points'] ?? 0);
         $note = $_POST['note'] ?? '';
+        $scoreDate = trim($_POST['score_date'] ?? '');
+
+        // 校验自定义日期格式
+        $createdAt = null;
+        $refDate = null;
+        if ($scoreDate) {
+            if (!preg_match('/^\d{4}-\d{2}-\d{2}$/', $scoreDate)) {
+                http_response_code(400);
+                die("日期格式错误喵，请使用 YYYY-MM-DD 格式喵");
+            }
+            // 校验日期是否在学期范围内
+            if ($scoreDate < $semester['start_date'] || $scoreDate > $semester['end_date']) {
+                http_response_code(400);
+                die("积分日期需在学期范围内（{$semester['start_date']} ~ {$semester['end_date']}）喵");
+            }
+            $createdAt = $scoreDate . ' ' . date('H:i:s');
+            $refDate = $scoreDate;
+        }
 
         $class = $pdo->prepare("SELECT * FROM classes WHERE id = ?");
         $class->execute([$classId]);
@@ -510,14 +625,20 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             }
         }
 
-        // 计算周次和月次（新算法）
-        $week = getWeekNumber($semester['start_date']);
-        $month = getMonthNumber($semester['start_date']);
+        // 计算周次和月次（基于自定义日期或当前日期）
+        $week = getWeekNumber($semester['start_date'], $refDate);
+        $month = getMonthNumber($semester['start_date'], $refDate);
 
-        $stmt = $pdo->prepare("INSERT INTO score_records (class_id, type_id, points, admin_id, note, image_path, semester_id, week_number, month_number) VALUES (?,?,?,?,?,?,?,?,?)");
-        $stmt->execute([$classId, $typeId, $points, $_SESSION['admin_id'], $note, $imagePath, $semester['id'], $week, $month]);
-        logAction('添加积分记录', 'class', $classId, "类型{$typeId} 分值{$points}");
-        echo "操作成功喵";
+        if ($createdAt) {
+            $stmt = $pdo->prepare("INSERT INTO score_records (class_id, type_id, points, admin_id, note, image_path, semester_id, week_number, month_number, created_at) VALUES (?,?,?,?,?,?,?,?,?,?)");
+            $stmt->execute([$classId, $typeId, $points, $_SESSION['admin_id'], $note, $imagePath, $semester['id'], $week, $month, $createdAt]);
+        } else {
+            $stmt = $pdo->prepare("INSERT INTO score_records (class_id, type_id, points, admin_id, note, image_path, semester_id, week_number, month_number) VALUES (?,?,?,?,?,?,?,?,?)");
+            $stmt->execute([$classId, $typeId, $points, $_SESSION['admin_id'], $note, $imagePath, $semester['id'], $week, $month]);
+        }
+        $dateInfo = $refDate ? " 日期:{$refDate}" : "";
+        logAction('添加积分记录', 'class', $classId, "类型{$typeId} 分值{$points}{$dateInfo}");
+        echo "操作成功喵" . ($refDate ? "（已使用自定义日期：{$refDate}）" : "");
         exit;
     }
 
@@ -631,6 +752,38 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         $pdo->prepare("DELETE FROM reward_punish_types WHERE id = ?")->execute([$typeId]);
         logAction('删除奖惩类型喵', 'type', $typeId, $type['name']);
         echo "删除成功喵";
+        exit;
+    }
+
+    // 添加年级
+    if ($postAction === 'add_grade') {
+        $name = trim($_POST['grade_name'] ?? '');
+        if (empty($name)) { http_response_code(400); die("请输入年级名称喵"); }
+        $check = $pdo->prepare("SELECT COUNT(*) FROM grades WHERE name = ?");
+        $check->execute([$name]);
+        if ($check->fetchColumn() > 0) { http_response_code(409); die("该年级名称已存在喵"); }
+        $pdo->prepare("INSERT INTO grades (name) VALUES (?)")->execute([$name]);
+        $newId = $pdo->lastInsertId();
+        logAction('添加年级喵', 'grade', $newId, $name);
+        echo "年级添加成功喵";
+        exit;
+    }
+
+    // 删除年级
+    if ($postAction === 'delete_grade') {
+        $gradeId = intval($_POST['id'] ?? 0);
+        if ($gradeId <= 0) { http_response_code(400); die("参数错误喵"); }
+        $grade = $pdo->prepare("SELECT * FROM grades WHERE id = ?");
+        $grade->execute([$gradeId]);
+        $grade = $grade->fetch();
+        if (!$grade) { http_response_code(404); die("年级不存在喵"); }
+        // 检查是否有班级关联
+        $check = $pdo->prepare("SELECT COUNT(*) FROM classes WHERE grade_id = ?");
+        $check->execute([$gradeId]);
+        if ($check->fetchColumn() > 0) { http_response_code(409); die("该年级下还有班级，无法删除喵，请先删除关联班级喵"); }
+        $pdo->prepare("DELETE FROM grades WHERE id = ?")->execute([$gradeId]);
+        logAction('删除年级喵', 'grade', $gradeId, $grade['name']);
+        echo "年级已删除喵";
         exit;
     }
 
@@ -826,12 +979,15 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
 
 // =================== GET 数据处理（只读接口，不做写操作）===================
 
-// 获取积分记录（image_path 转义修复）
+// 获取积分记录（image_path 转义修复，支持类型+时间范围筛选）
 if ($action === 'get_records') {
     $currentSemester = getCurrentSemester();
     if (!$currentSemester) { echo "<p>暂无当前学期数据</p>"; exit; }
 
     $classId = $_GET['class_id'] ?? '';
+    $scoreType = $_GET['score_type'] ?? '';
+    $dateFrom = $_GET['date_from'] ?? '';
+    $dateTo = $_GET['date_to'] ?? '';
     $sql = "SELECT sr.id, sr.points, sr.created_at, sr.note, sr.image_path,
                    c.name AS class_name, g.name AS grade_name, t.name AS type_name, t.type AS type_category
             FROM score_records sr
@@ -844,7 +1000,20 @@ if ($action === 'get_records') {
         $sql .= " AND sr.class_id = ?";
         $params[] = $classId;
     }
-    $sql .= " ORDER BY sr.created_at DESC LIMIT 100";
+    if ($scoreType === 'punish') {
+        $sql .= " AND t.type = 'punish'";
+    } elseif ($scoreType === 'reward') {
+        $sql .= " AND t.type = 'reward'";
+    }
+    if ($dateFrom) {
+        $sql .= " AND DATE(sr.created_at) >= ?";
+        $params[] = $dateFrom;
+    }
+    if ($dateTo) {
+        $sql .= " AND DATE(sr.created_at) <= ?";
+        $params[] = $dateTo;
+    }
+    $sql .= " ORDER BY sr.created_at DESC LIMIT 500";
 
     $stmt = $pdo->prepare($sql);
     $stmt->execute($params);
@@ -873,43 +1042,64 @@ if ($action === 'get_records') {
     exit;
 }
 
-// 排行榜（MySQL 8.0+ 使用 CTE 优化查询，5.7 回退原生 JOIN）
+// 排行榜（MySQL 8.0+ 使用 CTE 优化查询，5.7 回退原生 JOIN，支持自定义时间和类型筛选）
 if ($action === 'ranking') {
     $currentSemester = getCurrentSemester();
     if (!$currentSemester) { echo "<p>暂无当前学期数据</p>"; exit; }
 
     $period = $_GET['period'] ?? 'week';
     $gradeId = $_GET['grade_id'] ?? '';
+    $scoreType = $_GET['score_type'] ?? '';
+    $dateFrom = $_GET['date_from'] ?? '';
+    $dateTo = $_GET['date_to'] ?? '';
     $useCTE = function_exists('isMySQL80') && isMySQL80();
+
+    // 通用：计算附加 WHERE 条件（用于 CTE 内和 LEFT JOIN ON 内）
+    $extraFilter = '';
+    $extraParams = [];
+
+    // 时间范围
+    if ($period === 'week') {
+        $tz = new DateTimeZone('Asia/Shanghai');
+        $now = new DateTime('now', $tz);
+        $weekMonday = clone $now;
+        $dayOfWeek = (int)$now->format('N');
+        if ($dayOfWeek > 1) $weekMonday->modify('-' . ($dayOfWeek - 1) . ' days');
+        $weekMonday->setTime(0, 0, 0);
+        $weekSunday = clone $weekMonday;
+        $weekSunday->modify('+6 days')->setTime(23, 59, 59);
+        $extraFilter .= " AND sr.created_at BETWEEN ? AND ?";
+        $extraParams[] = $weekMonday->format('Y-m-d H:i:s');
+        $extraParams[] = $weekSunday->format('Y-m-d H:i:s');
+    } elseif ($period === 'month') {
+        $currentMonth = getMonthNumber($currentSemester['start_date']);
+        list($monthStart, $monthEnd) = getMonthDateRange($currentSemester['start_date'], $currentMonth);
+        $extraFilter .= " AND sr.created_at BETWEEN ? AND ?";
+        $extraParams[] = $monthStart->format('Y-m-d H:i:s');
+        $extraParams[] = $monthEnd->format('Y-m-d H:i:s');
+    } elseif ($period === 'custom') {
+        if ($dateFrom) {
+            $extraFilter .= " AND DATE(sr.created_at) >= ?";
+            $extraParams[] = $dateFrom;
+        }
+        if ($dateTo) {
+            $extraFilter .= " AND DATE(sr.created_at) <= ?";
+            $extraParams[] = $dateTo;
+        }
+    }
+    // 奖惩类型：需 JOIN types 表
+    if ($scoreType === 'punish' || $scoreType === 'reward') {
+        $extraFilter .= " AND EXISTS (SELECT 1 FROM reward_punish_types t2 WHERE t2.id = sr.type_id AND t2.type = ?)";
+        $extraParams[] = $scoreType;
+    }
 
     if ($useCTE) {
         // MySQL 8.0+：CTE 先聚合过滤后的积分，再 JOIN 班级信息，逻辑更清晰
-        $cteFilter = '';
-        $cteParams = [$currentSemester['id']];
-        if ($period === 'week') {
-            $tz = new DateTimeZone('Asia/Shanghai');
-            $now = new DateTime('now', $tz);
-            $weekMonday = clone $now;
-            $dayOfWeek = (int)$now->format('N');
-            if ($dayOfWeek > 1) $weekMonday->modify('-' . ($dayOfWeek - 1) . ' days');
-            $weekMonday->setTime(0, 0, 0);
-            $weekSunday = clone $weekMonday;
-            $weekSunday->modify('+6 days')->setTime(23, 59, 59);
-            $cteFilter = " AND sr.created_at BETWEEN ? AND ?";
-            $cteParams[] = $weekMonday->format('Y-m-d H:i:s');
-            $cteParams[] = $weekSunday->format('Y-m-d H:i:s');
-        } elseif ($period === 'month') {
-            $currentMonth = getMonthNumber($currentSemester['start_date']);
-            list($monthStart, $monthEnd) = getMonthDateRange($currentSemester['start_date'], $currentMonth);
-            $cteFilter = " AND sr.created_at BETWEEN ? AND ?";
-            $cteParams[] = $monthStart->format('Y-m-d H:i:s');
-            $cteParams[] = $monthEnd->format('Y-m-d H:i:s');
-        }
-
+        $cteParams = array_merge([$currentSemester['id']], $extraParams);
         $sql = "WITH filtered_scores AS (
                     SELECT sr.class_id, SUM(sr.points) AS total
                     FROM score_records sr
-                    WHERE sr.semester_id = ?{$cteFilter}
+                    WHERE sr.semester_id = ?{$extraFilter}
                     GROUP BY sr.class_id
                 )
                 SELECT c.id, c.name AS class_name, g.name AS grade_name, COALESCE(fs.total, 0) AS total, c.is_frozen
@@ -924,30 +1114,15 @@ if ($action === 'ranking') {
                 JOIN grades g ON c.grade_id = g.id
                 LEFT JOIN score_records sr ON sr.class_id = c.id AND sr.semester_id = ?";
         $params = [$currentSemester['id']];
-
-        if ($period === 'week') {
-            $tz = new DateTimeZone('Asia/Shanghai');
-            $now = new DateTime('now', $tz);
-            $weekMonday = clone $now;
-            $dayOfWeek = (int)$now->format('N');
-            if ($dayOfWeek > 1) $weekMonday->modify('-' . ($dayOfWeek - 1) . ' days');
-            $weekMonday->setTime(0, 0, 0);
-            $weekSunday = clone $weekMonday;
-            $weekSunday->modify('+6 days')->setTime(23, 59, 59);
-            $sql .= " AND sr.created_at BETWEEN ? AND ?";
-            $params[] = $weekMonday->format('Y-m-d H:i:s');
-            $params[] = $weekSunday->format('Y-m-d H:i:s');
-        } elseif ($period === 'month') {
-            $currentMonth = getMonthNumber($currentSemester['start_date']);
-            list($monthStart, $monthEnd) = getMonthDateRange($currentSemester['start_date'], $currentMonth);
-            $sql .= " AND sr.created_at BETWEEN ? AND ?";
-            $params[] = $monthStart->format('Y-m-d H:i:s');
-            $params[] = $monthEnd->format('Y-m-d H:i:s');
+        // 5.7 场景：把 extraFilter 中的 sr. 条件挂到 LEFT JOIN 的 ON 子句，同时需把 type 子查询改写
+        foreach ($extraParams as $i => $val) {
+            $params[] = $val;
         }
+        $sql .= $extraFilter;
     }
 
     if ($gradeId) {
-        $sql .= " AND g.id = ?";
+        $sql .= " WHERE g.id = ?";
         $params[] = $gradeId;
     }
 
@@ -967,12 +1142,15 @@ if ($action === 'ranking') {
     exit;
 }
 
-// 导出积分明细（CSV 全部字段用 csvEscape 安全转义）
+// 导出积分明细（CSV 全部字段用 csvEscape 安全转义，支持筛选条件）
 if ($action === 'export_records' && !isGuest() && canOperateScore()) {
     $currentSemester = getCurrentSemester();
     if (!$currentSemester) die("无当前学期");
 
     $classId = $_GET['class_id'] ?? '';
+    $scoreType = $_GET['score_type'] ?? '';
+    $dateFrom = $_GET['date_from'] ?? '';
+    $dateTo = $_GET['date_to'] ?? '';
     $sql = "SELECT g.name AS grade_name, c.name AS class_name, t.name AS type_name,
                    CASE t.type WHEN 'punish' THEN '惩罚' ELSE '奖励' END AS type_category,
                    sr.points, sr.created_at, sr.note, sr.image_path
@@ -985,6 +1163,19 @@ if ($action === 'export_records' && !isGuest() && canOperateScore()) {
     if ($classId) {
         $sql .= " AND sr.class_id = ?";
         $params[] = $classId;
+    }
+    if ($scoreType === 'punish') {
+        $sql .= " AND t.type = 'punish'";
+    } elseif ($scoreType === 'reward') {
+        $sql .= " AND t.type = 'reward'";
+    }
+    if ($dateFrom) {
+        $sql .= " AND DATE(sr.created_at) >= ?";
+        $params[] = $dateFrom;
+    }
+    if ($dateTo) {
+        $sql .= " AND DATE(sr.created_at) <= ?";
+        $params[] = $dateTo;
     }
     $sql .= " ORDER BY sr.created_at DESC";
     $stmt = $pdo->prepare($sql);
@@ -1090,6 +1281,36 @@ if ($action === 'get_classes' && !isGuest() && canOperateSystem()) {
               </tr>";
     }
     echo "</tbody></table>";
+    exit;
+}
+
+// 获取年级列表（管理）
+if ($action === 'get_grades' && !isGuest() && canOperateSystem()) {
+    $grades = $pdo->query("SELECT g.*, (SELECT COUNT(*) FROM classes c WHERE c.grade_id = g.id) AS class_count FROM grades g ORDER BY g.id")->fetchAll();
+    echo "<table class='responsive-card' style='width:100%'><thead><tr><th>ID</th><th>年级名称</th><th>关联班级数</th><th>操作</th></tr></thead><tbody>";
+    foreach ($grades as $g) {
+        $delBtn = $g['class_count'] > 0
+            ? "<span style='color:#94a3b8; font-size:0.75rem;'>有班级不可删</span>"
+            : "<form style='display:inline;' onsubmit='event.preventDefault(); if(!confirm(\"确定删除该年级喵？\")) return false; apiPost(\"delete_grade\", {id: {$g['id']}}).then(r=>r.text()).then(m=>{alert(m);loadGrades();loadClasses();}); return false;'>
+                 <button class='btn-sm btn-delete' type='submit'>删除</button></form>";
+        echo "<tr>
+                <td data-label='ID'>".(int)$g['id']."</td>
+                <td data-label='年级名称'>".htmlspecialchars($g['name'], ENT_QUOTES)."</td>
+                <td data-label='关联班级数'>".(int)$g['class_count']."</td>
+                <td data-label='操作'>{$delBtn}</td>
+              </tr>";
+    }
+    echo "</tbody></table>";
+    exit;
+}
+
+// 获取年级下拉选项（用于班级管理中刷新年级下拉框）
+if ($action === 'get_grades_select') {
+    $grades = $pdo->query("SELECT * FROM grades ORDER BY id")->fetchAll();
+    echo "<option value=''>选择年级喵</option>";
+    foreach ($grades as $g) {
+        echo "<option value='".(int)$g['id']."'>".htmlspecialchars($g['name'], ENT_QUOTES)."</option>";
+    }
     exit;
 }
 

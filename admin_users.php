@@ -17,7 +17,13 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['add_user'])) {
     $password = $_POST['password'] ?? '';
     $role = $_POST['role'] ?? '';
     $securityQuestion = $_POST['security_question'] ?? '';
+    $customQuestion = trim($_POST['custom_security_question'] ?? '');
     $securityAnswer = $_POST['security_answer'] ?? '';
+
+    // 如果选了自定义问题，使用用户输入的自定义内容
+    if ($securityQuestion === '__custom__') {
+        $securityQuestion = $customQuestion;
+    }
 
     // 密码强度
     if (strlen($password) < 8 || !preg_match('/[a-z]/', $password) || !preg_match('/[A-Z]/', $password) || !preg_match('/[0-9]/', $password)) {
@@ -26,6 +32,8 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['add_user'])) {
         $message = "无效的角色喵";
     } elseif ($role === 'super_admin' && $superAdminCount >= 1) {
         $message = "超级管理员只能存在一个喵，无法新增喵";
+    } elseif ($securityQuestion === '__custom__') {
+        $message = "请输入自定义密保问题喵";
     } else {
         $check = $pdo->prepare("SELECT id FROM admins WHERE username = ?");
         $check->execute([$username]);
@@ -136,18 +144,29 @@ $securityQuestions = getSecurityQuestions();
             <div class="row">
                 <div>
                     <label>密保问题（可选，用于忘记密码）</label>
-                    <select name="security_question">
+                    <select name="security_question" id="security-question-select" onchange="toggleCustomQuestion()">
                         <option value="">-- 不设置 --</option>
                         <?php foreach ($securityQuestions as $q): ?>
                             <option value="<?= htmlspecialchars($q, ENT_QUOTES) ?>"><?= htmlspecialchars($q) ?></option>
                         <?php endforeach; ?>
+                        <option value="__custom__">✏️ 自定义问题...</option>
                     </select>
+                    <input type="text" name="custom_security_question" id="custom-question-input"
+                           placeholder="请输入自定义密保问题"
+                           style="display:none; margin-top:0.4rem;">
                 </div>
                 <div>
                     <label>密保答案</label>
                     <input type="text" name="security_answer" placeholder="填写密保问题答案">
                 </div>
             </div>
+            <script>
+                function toggleCustomQuestion() {
+                    const sel = document.getElementById('security-question-select');
+                    const input = document.getElementById('custom-question-input');
+                    input.style.display = (sel.value === '__custom__') ? 'block' : 'none';
+                }
+            </script>
             <button type="submit" name="add_user" class="btn">添加管理员喵</button>
         </form>
     </div>

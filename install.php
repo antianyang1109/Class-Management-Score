@@ -704,7 +704,13 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && ($_POST['step'] ?? '') === '3') {
     $password = $_POST['password'] ?? '';
     $passwordConfirm = $_POST['password_confirm'] ?? '';
     $securityQuestion = $_POST['security_question'] ?? '';
+    $customQuestion = trim($_POST['custom_security_question'] ?? '');
     $securityAnswer = $_POST['security_answer'] ?? '';
+
+    // 自定义密保问题处理
+    if ($securityQuestion === '__custom__') {
+        $securityQuestion = $customQuestion;
+    }
 
     $err = null;
     if ($username === '' || $password === '') {
@@ -713,6 +719,8 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && ($_POST['step'] ?? '') === '3') {
         $err = '密码强度不足，至少8位，需包含大小写字母和数字';
     } elseif ($password !== $passwordConfirm) {
         $err = '两次输入的密码不一致';
+    } elseif ($securityQuestion === '__custom__') {
+        $err = '请输入自定义密保问题内容';
     }
 
     if ($err) {
@@ -1037,18 +1045,31 @@ $securityQuestions = [
     <div class="row2">
         <div class="row">
             <label>密保问题（推荐，用于忘记密码）</label>
-            <select name="security_question">
+            <select name="security_question" id="install-security-question" onchange="toggleInstallCustomQuestion()">
                 <option value="">-- 不设置 --</option>
                 <?php foreach ($securityQuestions as $q): ?>
                     <option value="<?= htmlspecialchars($q, ENT_QUOTES) ?>"><?= htmlspecialchars($q) ?></option>
                 <?php endforeach; ?>
+                <option value="__custom__">✏️ 自定义问题...</option>
             </select>
+            <input type="text" name="custom_security_question" id="install-custom-question"
+                   placeholder="请输入自定义密保问题"
+                   style="display:none; margin-top:0.4rem;">
         </div>
         <div class="row">
             <label>密保答案</label>
             <input type="text" name="security_answer" placeholder="如设置了密保问题，请填写答案">
         </div>
     </div>
+    <script>
+        function toggleInstallCustomQuestion() {
+            const sel = document.getElementById('install-security-question');
+            const input = document.getElementById('install-custom-question');
+            if (sel && input) {
+                input.style.display = (sel.value === '__custom__') ? 'block' : 'none';
+            }
+        }
+    </script>
     <div class="hr"></div>
     <div style="text-align:center;">
         <button type="submit" class="btn">🎉 完成安装</button>
