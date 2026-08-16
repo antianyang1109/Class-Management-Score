@@ -5,46 +5,6 @@ header('Content-Type: text/html; charset=utf-8');
 $action = $_GET['action'] ?? '';
 $tab = $_GET['tab'] ?? '';
 
-
-/**
- *                             _ooOoo_
- *                            o8888888o
- *                            88" . "88
- *                            (| -_- |)
- *                            O\  =  /O
- *                         ____/`---'\____
- *                       .'  \\|     |//  `.
- *                      /  \\|||  :  |||//  \
- *                     /  _||||| -:- |||||-  \
- *                     |   | \\\  -  /// |   |
- *                     | \_|  ''\---/''  |   |
- *                     \  .-\__  `-`  ___/-. /
- *                   ___`. .'  /--.--\  `. . __
- *                ."" '<  `.___\_<|>_/___.'  >'"".
- *               | | :  `- \`.;`\ _ /`;.`/ - ` : | |
- *               \  \ `-.   \_ __\ /__ _/   .-` /  /
- *          ======`-.____`-.___\_____/___.-`____.-'======
- *                             `=---='
- *          ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
- *                     佛祖保佑        永无BUG
- *            佛曰:
- *                   写字楼里写字间，写字间里程序员；
- *                   程序人员写程序，又拿程序换酒钱。
- *                   酒醒只在网上坐，酒醉还来网下眠；
- *                   酒醉酒醒日复日，网上网下年复年。
- *                   但愿老死电脑间，不愿鞠躬老板前；
- *                   奔驰宝马贵者趣，公交自行程序员。
- *                   别人笑我忒疯癫，我笑自己命太贱；
- *                   不见满街漂亮妹，哪个归得程序员？
-*/
-
-
-
-
-/**
-*注意，这是校园班级管理分网站API文件
-*喵言喵语喵
-*/
 // 需要当前学期的操作列表
 $need_semester_actions = ['add_score', 'get_records', 'ranking', 'export_scores', 'export_records'];
 $need_semester_tabs    = ['quick', 'records', 'ranking'];
@@ -53,21 +13,17 @@ $semester = null;
 if (in_array($action, $need_semester_actions) || in_array($tab, $need_semester_tabs)) {
     $semester = getCurrentSemester();
     if (!$semester && !in_array($action, ['get_records', 'ranking', 'export_records', 'export_scores'])) {
-        http_response_code(400);
-        die("❌ 请先在「管理」→「学期管理」中设置当前学期喵。");
+        die("请先设置学期喵");
     }
 }
 
-// 辅助函数：返回可见班级
+// 辅助函数：返回可见班级（新角色逻辑）
 function getVisibleClasses() {
     global $pdo;
-    $role = $_SESSION['role'] ?? 'guest';
-    if ($role === 'super_admin' || $role === 'guest') {
+    $role = currentRole();
+    // super_admin / system_admin / score_admin 都可见全部班级
+    if (in_array($role, ['super_admin', 'system_admin', 'score_admin']) || $role === 'guest') {
         $stmt = $pdo->query("SELECT c.*, g.name AS grade_name FROM classes c JOIN grades g ON c.grade_id = g.id ORDER BY g.id, c.name");
-        return $stmt->fetchAll();
-    } elseif ($role === 'grade_admin') {
-        $stmt = $pdo->prepare("SELECT c.*, g.name AS grade_name FROM classes c JOIN grades g ON c.grade_id = g.id WHERE c.grade_id = ? ORDER BY c.name");
-        $stmt->execute([$_SESSION['grade_id']]);
         return $stmt->fetchAll();
     }
     return [];
@@ -75,11 +31,10 @@ function getVisibleClasses() {
 
 // =================== Tab 页面输出 ===================
 
-// 快捷操作（仅管理员）
-if ($tab === 'quick' && isset($_SESSION['admin_id']) && in_array($_SESSION['role'], ['super_admin', 'grade_admin'])) {
+// 快捷操作（积分管理员/系统管理员/超级管理员可用）
+if ($tab === 'quick' && canOperateScore()) {
     $classes = getVisibleClasses();
     $allTypes = $pdo->query("SELECT * FROM reward_punish_types ORDER BY type, category, name")->fetchAll();
-    // 构造分组结构
     $groupedTypes = ['punish' => [], 'reward' => []];
     foreach ($allTypes as $t) {
         $cat = $t['category'] ?: '其他';
@@ -126,7 +81,6 @@ if ($tab === 'quick' && isset($_SESSION['admin_id']) && in_array($_SESSION['role
             <div style="margin-bottom:0.8rem;">
                 <label>具体类型喵</label>
                 <select name="type_id" id="type-select" onchange="updateQuickPoints(this)" required>
-                    <!-- 动态填充 -->
                 </select>
             </div>
             <div style="margin-bottom:0.8rem;">
@@ -145,27 +99,30 @@ if ($tab === 'quick' && isset($_SESSION['admin_id']) && in_array($_SESSION['role
         </form>
     </div>
     <script>
-        window._groupedTypes = <?= json_encode($groupedTypes) ?>;
+        window._groupedTypes = <?= json_encode($groupedTypes, JSON_HEX_TAG | JSON_HEX_AMP | JSON_HEX_APOS | JSON_HEX_QUOT | JSON_UNESCAPED_UNICODE) ?>;
     </script>
     <?php
     exit;
 }
 
-// 积分记录
+// 积分记录（登录用户可见撤回按钮，游客只读）
 if ($tab === 'records') {
     $classes = getVisibleClasses();
+    $canExport = !isGuest() && canOperateScore();
     ?>
     <div class="card">
-        <h3>📋 积分记录喵</h3>
-        <select id="filter-class" onchange="loadRecords()">
-            <option value="">全部班级喵</option>
-            <?php foreach ($classes as $c): ?>
-                <option value="<?= $c['id'] ?>"><?= htmlspecialchars($c['grade_name'].' '.$c['name']) ?></option>
-            <?php endforeach; ?>
-        </select>
-        <?php if (isset($_SESSION['admin_id']) && in_array($_SESSION['role'], ['super_admin', 'grade_admin'])): ?>
-            <button class="btn" onclick="exportRecords()" style="margin-left:0.5rem;">📥 导出记录喵</button>
-        <?php endif; ?>
+        <h3>📋 积分记录</h3>
+        <div class="filter-bar">
+            <select id="filter-class" onchange="loadRecords()">
+                <option value="">全部班级</option>
+                <?php foreach ($classes as $c): ?>
+                    <option value="<?= $c['id'] ?>"><?= htmlspecialchars($c['grade_name'].' '.$c['name']) ?></option>
+                <?php endforeach; ?>
+            </select>
+            <?php if ($canExport): ?>
+                <button class="btn" onclick="exportRecords()">📥 导出记录</button>
+            <?php endif; ?>
+        </div>
         <div id="records-list"></div>
     </div>
     <script>
@@ -186,24 +143,26 @@ if ($tab === 'records') {
     exit;
 }
 
-// 排行榜
+// 排行榜（所有人可见）
 if ($tab === 'ranking') {
     $period = $_GET['period'] ?? 'week';
     ?>
     <div class="card">
-        <h3>🏆 排行榜喵</h3>
-        <select id="period-select" onchange="loadRanking()">
-            <option value="week" <?= $period=='week'?'selected':'' ?>>周榜喵</option>
-            <option value="month" <?= $period=='month'?'selected':'' ?>>月榜喵</option>
-            <option value="semester" <?= $period=='semester'?'selected':'' ?>>学期榜喵</option>
-        </select>
-        <select id="grade-filter" onchange="loadRanking()">
-            <option value="">所有年级喵</option>
-            <?php
-            $grades = $pdo->query("SELECT * FROM grades")->fetchAll();
-            foreach ($grades as $g) echo "<option value='{$g['id']}'>{$g['name']}</option>";
-            ?>
-        </select>
+        <h3>🏆 排行榜</h3>
+        <div class="filter-bar">
+            <select id="period-select" onchange="loadRanking()">
+                <option value="week" <?= $period=='week'?'selected':'' ?>>周榜</option>
+                <option value="month" <?= $period=='month'?'selected':'' ?>>月榜</option>
+                <option value="semester" <?= $period=='semester'?'selected':'' ?>>学期榜</option>
+            </select>
+            <select id="grade-filter" onchange="loadRanking()">
+                <option value="">所有年级</option>
+                <?php
+                $grades = $pdo->query("SELECT * FROM grades")->fetchAll();
+                foreach ($grades as $g) echo "<option value='".(int)$g['id']."'>".htmlspecialchars($g['name'], ENT_QUOTES)."</option>";
+                ?>
+            </select>
+        </div>
         <div id="ranking-content"></div>
     </div>
     <script>
@@ -219,15 +178,17 @@ if ($tab === 'ranking') {
     exit;
 }
 
-// 管理页面（仅超级管理员）
-if ($tab === 'admin' && isset($_SESSION['admin_id']) && $_SESSION['role'] === 'super_admin') {
+// 管理页面（仅超级管理员 + 系统管理员，但账号管理仅超级管理员）
+if ($tab === 'admin' && canOperateSystem()) {
     ?>
     <div class="grid-2">
+        <?php if (isSuperAdmin()): ?>
         <div class="card">
             <h3>👥 管理员管理喵</h3>
-            <p style="color:#64748b;">管理登录账户及角色分配喵</p>
+            <p style="color:#64748b;">管理登录账户及角色分配喵（仅超级管理员可用）</p>
             <div class="btn-row"><a href="admin_users.php" class="btn">管理账户喵</a></div>
         </div>
+        <?php endif; ?>
         <div class="card">
             <h3>🔐 安全设置</h3>
             <p style="color:#64748b; font-size:0.85rem;">启用身份验证器二次验证，增强账户安全</p>
@@ -278,7 +239,7 @@ if ($tab === 'admin' && isset($_SESSION['admin_id']) && $_SESSION['role'] === 's
                     <option value="">选择年级喵</option>
                     <?php
                     $grades = $pdo->query("SELECT * FROM grades")->fetchAll();
-                    foreach ($grades as $g) echo "<option value='{$g['id']}'>{$g['name']}</option>";
+                    foreach ($grades as $g) echo "<option value='".(int)$g['id']."'>".htmlspecialchars($g['name'], ENT_QUOTES)."</option>";
                     ?>
                 </select>
                 <input type="text" name="class_name" placeholder="班级名称喵" required>
@@ -298,13 +259,60 @@ if ($tab === 'admin' && isset($_SESSION['admin_id']) && $_SESSION['role'] === 's
             <div id="class-list"></div>
         </div>
     </div>
+
+    <!-- 服务器状态 -->
+    <div class="card grid-full">
+        <h3>🖥️ 服务器状态喵</h3>
+        <div class="server-status">
+            <div class="ss-item"><label>PHP 版本</label><span><?= PHP_VERSION ?></span></div>
+            <div class="ss-item"><label>MySQL 版本</label><span><?= htmlspecialchars((string)$pdo->query("SELECT VERSION()")->fetchColumn(), ENT_QUOTES) ?></span></div>
+            <div class="ss-item"><label>操作系统</label><span><?= htmlspecialchars(PHP_OS . ' ' . php_uname('r'), ENT_QUOTES) ?></span></div>
+            <div class="ss-item"><label>Web 服务器</label><span><?= htmlspecialchars($_SERVER['SERVER_SOFTWARE'] ?? '未知', ENT_QUOTES) ?></span></div>
+            <div class="ss-item"><label>磁盘剩余</label><span><?php $d = @disk_free_space(__DIR__); echo $d === false ? '不可用' : number_format($d / 1073741824, 1) . ' GB'; ?></span></div>
+            <div class="ss-item"><label>磁盘总量</label><span><?php $d = @disk_total_space(__DIR__); echo $d === false ? '不可用' : number_format($d / 1073741824, 1) . ' GB'; ?></span></div>
+            <div class="ss-item"><label>上传限制</label><span><?= htmlspecialchars(ini_get('upload_max_filesize'), ENT_QUOTES) ?></span></div>
+            <div class="ss-item"><label>PHP 内存</label><span><?= htmlspecialchars(ini_get('memory_limit'), ENT_QUOTES) ?></span></div>
+            <div class="ss-item"><label>时区</label><span><?= htmlspecialchars(date_default_timezone_get(), ENT_QUOTES) ?></span></div>
+        </div>
+    </div>
+
+    <!-- 操作日志卡片 -->
+    <div class="card" style="margin-top:1rem;">
+        <h3>📜 操作日志</h3>
+        <div class="filter-bar">
+            <select id="log-admin-filter">
+                <option value="">所有管理员</option>
+            </select>
+            <input type="text" id="log-keyword" placeholder="搜索操作...">
+            <div class="date-range-group">
+                <input type="date" id="log-date-from">
+                <span>~</span>
+                <input type="date" id="log-date-to">
+            </div>
+            <button class="btn" onclick="loadLogs()">搜索</button>
+        </div>
+        <div id="log-list" style="max-height:500px; overflow-y:auto;"></div>
+    </div>
     <script>
+        // ========== 通用：发送 POST 请求并带 CSRF ==========
+        async function apiPost(action, extraData = {}) {
+            const data = new FormData();
+            data.append('action', action);
+            data.append('csrf_token', window._csrfToken);
+            for (const [k, v] of Object.entries(extraData)) {
+                if (v instanceof FileList) {
+                    for (let i = 0; i < v.length; i++) data.append(k, v[i]);
+                } else {
+                    data.append(k, v);
+                }
+            }
+            return fetch('api.php', { method: 'POST', body: data });
+        }
+
         async function addSemester() {
             const form = document.getElementById('semester-form');
-            const data = new FormData(form);
-            data.append('action', 'add_semester');
-            data.append('csrf_token', window._csrfToken);
-            const res = await fetch('api.php', { method: 'POST', body: data });
+            const fd = new FormData(form);
+            const res = await apiPost('add_semester', Object.fromEntries(fd.entries()));
             alert(await res.text());
             loadSemesters();
         }
@@ -314,10 +322,8 @@ if ($tab === 'admin' && isset($_SESSION['admin_id']) && $_SESSION['role'] === 's
         }
         async function addType() {
             const form = document.getElementById('type-form');
-            const data = new FormData(form);
-            data.append('action', 'add_type');
-            data.append('csrf_token', window._csrfToken);
-            const res = await fetch('api.php', { method: 'POST', body: data });
+            const fd = new FormData(form);
+            const res = await apiPost('add_type', Object.fromEntries(fd.entries()));
             alert(await res.text());
             loadTypes();
         }
@@ -327,18 +333,14 @@ if ($tab === 'admin' && isset($_SESSION['admin_id']) && $_SESSION['role'] === 's
         }
         async function restoreBackup() {
             const form = document.getElementById('restore-form');
-            const data = new FormData(form);
-            data.append('action', 'restore');
-            data.append('csrf_token', window._csrfToken);
-            const res = await fetch('api.php', { method: 'POST', body: data });
+            const fd = new FormData(form);
+            const res = await apiPost('restore', Object.fromEntries(fd.entries()));
             alert(await res.text());
         }
         async function addClass() {
             const form = document.getElementById('class-form');
-            const data = new FormData(form);
-            data.append('action', 'add_class');
-            data.append('csrf_token', window._csrfToken);
-            const res = await fetch('api.php', { method: 'POST', body: data });
+            const fd = new FormData(form);
+            const res = await apiPost('add_class', Object.fromEntries(fd.entries()));
             alert(await res.text());
             loadClasses();
         }
@@ -396,11 +398,7 @@ if ($tab === 'admin' && isset($_SESSION['admin_id']) && $_SESSION['role'] === 's
                 alert('请输入6位数字验证码喵');
                 return;
             }
-            const data = new FormData();
-            data.append('action', 'totp_enable');
-            data.append('code', code);
-            data.append('csrf_token', window._csrfToken);
-            const res = await fetch('api.php', { method: 'POST', body: data });
+            const res = await apiPost('totp_enable', { code });
             const result = await res.json();
             alert(result.message);
             if (result.success) {
@@ -412,35 +410,63 @@ if ($tab === 'admin' && isset($_SESSION['admin_id']) && $_SESSION['role'] === 's
         async function disableTotp() {
             const password = prompt('请输入当前密码以禁用二次验证喵：');
             if (!password) return;
-            const data = new FormData();
-            data.append('action', 'totp_disable');
-            data.append('password', password);
-            data.append('csrf_token', window._csrfToken);
-            const res = await fetch('api.php', { method: 'POST', body: data });
+            const res = await apiPost('totp_disable', { password });
             const result = await res.json();
             alert(result.message);
             if (result.success) {
                 loadTotpStatus();
             }
         }
+
+        // 操作日志
+        async function loadLogs() {
+            const adminId = document.getElementById('log-admin-filter').value;
+            const keyword = encodeURIComponent(document.getElementById('log-keyword').value);
+            const dateFrom = document.getElementById('log-date-from').value;
+            const dateTo = document.getElementById('log-date-to').value;
+            let url = 'api.php?action=get_logs';
+            if (adminId) url += '&admin_id=' + adminId;
+            if (keyword) url += '&keyword=' + keyword;
+            if (dateFrom) url += '&date_from=' + dateFrom;
+            if (dateTo) url += '&date_to=' + dateTo;
+            const res = await fetch(url);
+            document.getElementById('log-list').innerHTML = await res.text();
+        }
+        async function loadLogAdminFilter() {
+            const res = await fetch('api.php?action=get_admins');
+            const select = document.getElementById('log-admin-filter');
+            select.innerHTML = '<option value="">所有管理员</option>' + await res.text();
+        }
+        loadLogs();
+        loadLogAdminFilter();
     </script>
     <?php
     exit;
 }
 
-// =================== POST 请求处理 ===================
+// =================== POST 请求处理（全部要求 CSRF） ===================
 if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     $postAction = $_POST['action'] ?? '';
 
-    // CSRF 防护：所有带 action 的 POST 请求均需验证
+    // 所有带 action 的 POST 请求均需验证 CSRF（install 阶段由 install 单独处理）
     if (!empty($postAction)) {
         validateCsrf();
     }
 
-    $requiresLogin = ['add_score', 'add_semester', 'add_type', 'add_class', 'restore', 'delete_record', 'import_classes'];
-    if (in_array($postAction, $requiresLogin)) {
+    // ====== 权限检查（新角色逻辑）======
+    $scoreOps = ['add_score', 'delete_record', 'import_classes'];
+    $systemOps = ['add_semester', 'add_type', 'add_class', 'restore',
+                  'set_current_semester', 'delete_class', 'freeze_class', 'unfreeze_class', 'delete_type'];
+    $loginOnlyOps = array_merge($scoreOps, $systemOps, ['totp_enable', 'totp_disable']);
+
+    if (in_array($postAction, $loginOnlyOps)) {
         requireLogin();
-        checkRole(['super_admin', 'grade_admin']);
+    }
+    if (in_array($postAction, $scoreOps) && !canOperateScore()) {
+        http_response_code(403); die("权限不足喵，无积分操作权限");
+    }
+    if (in_array($postAction, $systemOps) && !canOperateSystem()) {
+        http_response_code(403); die("权限不足喵，无系统运维权限");
     }
 
     // 添加积分记录
@@ -461,7 +487,6 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         $class->execute([$classId]);
         $class = $class->fetch();
         if (!$class) { http_response_code(404); die("班级不存在喵"); }
-        if ($_SESSION['role'] === 'grade_admin' && $class['grade_id'] != $_SESSION['grade_id']) { http_response_code(403); die("权限不足喵"); }
         if ($class['is_frozen']) { http_response_code(403); die("该班级已被冻结了喵，无法操作喵"); }
 
         // 图片上传
@@ -485,13 +510,13 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             }
         }
 
-        // 计算周次和月次
+        // 计算周次和月次（新算法）
         $week = getWeekNumber($semester['start_date']);
-        $month = ceil((time() - strtotime($semester['start_date'])) / (30*24*3600));
+        $month = getMonthNumber($semester['start_date']);
 
         $stmt = $pdo->prepare("INSERT INTO score_records (class_id, type_id, points, admin_id, note, image_path, semester_id, week_number, month_number) VALUES (?,?,?,?,?,?,?,?,?)");
         $stmt->execute([$classId, $typeId, $points, $_SESSION['admin_id'], $note, $imagePath, $semester['id'], $week, $month]);
-        logAction('添加积分记录喵', 'class', $classId, "类型{$typeId} 分值{$points}");
+        logAction('添加积分记录', 'class', $classId, "类型{$typeId} 分值{$points}");
         echo "操作成功喵";
         exit;
     }
@@ -503,7 +528,6 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         $record->execute([$recordId]);
         $record = $record->fetch();
         if (!$record) { http_response_code(404); die("记录不存在喵"); }
-        if ($_SESSION['role'] === 'grade_admin' && $record['grade_id'] != $_SESSION['grade_id']) { http_response_code(403); die("权限不足喵"); }
 
         if (!empty($record['image_path'])) {
             $filePath = __DIR__ . parse_url($record['image_path'], PHP_URL_PATH);
@@ -511,14 +535,13 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         }
 
         $pdo->prepare("DELETE FROM score_records WHERE id = ?")->execute([$recordId]);
-        logAction('撤回积分记录喵', 'record', $recordId, "原分值{$record['points']}");
-        echo "撤回成功喵";
+        logAction('撤回积分记录', 'record', $recordId, "原分值{$record['points']}");
+        echo "撤回成功";
         exit;
     }
 
     // 添加学期
     if ($postAction === 'add_semester') {
-        if ($_SESSION['role'] !== 'super_admin') { http_response_code(403); die("权限不足喵"); }
         $name = $_POST['name'] ?? '';
         $start = $_POST['start_date'] ?? '';
         $end = $_POST['end_date'] ?? '';
@@ -526,6 +549,57 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         $pdo->prepare("INSERT INTO semesters (name, start_date, end_date) VALUES (?,?,?)")->execute([$name, $start, $end]);
         logAction('添加学期喵', 'semester', null, $name);
         echo "学期添加成功喵";
+        exit;
+    }
+
+    // ====== 设为当前学期（改为POST+CSRF）======
+    if ($postAction === 'set_current_semester') {
+        if (!isSuperAdmin()) { http_response_code(403); die("权限不足喵，仅超级管理员可切换学期"); }
+        $id = intval($_POST['id'] ?? 0);
+        if ($id <= 0) { http_response_code(400); die("参数错误喵"); }
+        $pdo->exec("UPDATE semesters SET is_current = 0");
+        $pdo->prepare("UPDATE semesters SET is_current = 1 WHERE id = ?")->execute([$id]);
+        logAction('切换当前学期喵', 'semester', $id);
+        echo "已切换当前学期，请刷新页面喵。";
+        exit;
+    }
+
+    // ====== 删除班级（改为POST+CSRF）======
+    if ($postAction === 'delete_class') {
+        $classId = intval($_POST['id'] ?? 0);
+        $class = $pdo->prepare("SELECT * FROM classes WHERE id = ?");
+        $class->execute([$classId]);
+        $class = $class->fetch();
+        if (!$class) { http_response_code(404); die("班级不存在喵"); }
+        $pdo->prepare("DELETE FROM classes WHERE id = ?")->execute([$classId]);
+        logAction('删除班级喵', 'class', $classId, $class['name']);
+        echo "班级已删除喵";
+        exit;
+    }
+
+    // ====== 冻结班级（改为POST+CSRF）======
+    if ($postAction === 'freeze_class') {
+        $classId = intval($_POST['id'] ?? 0);
+        $class = $pdo->prepare("SELECT * FROM classes WHERE id = ?");
+        $class->execute([$classId]);
+        $class = $class->fetch();
+        if (!$class) { http_response_code(404); die("班级不存在喵"); }
+        $pdo->prepare("UPDATE classes SET is_frozen = 1 WHERE id = ?")->execute([$classId]);
+        logAction('冻结班级喵', 'class', $classId, $class['name']);
+        echo "班级已冻结喵";
+        exit;
+    }
+
+    // ====== 解冻班级（改为POST+CSRF）======
+    if ($postAction === 'unfreeze_class') {
+        $classId = intval($_POST['id'] ?? 0);
+        $class = $pdo->prepare("SELECT * FROM classes WHERE id = ?");
+        $class->execute([$classId]);
+        $class = $class->fetch();
+        if (!$class) { http_response_code(404); die("班级不存在喵"); }
+        $pdo->prepare("UPDATE classes SET is_frozen = 0 WHERE id = ?")->execute([$classId]);
+        logAction('解冻班级喵', 'class', $classId, $class['name']);
+        echo "班级已解冻喵";
         exit;
     }
 
@@ -543,13 +617,29 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         exit;
     }
 
+    // ====== 删除奖惩类型（改为POST+CSRF）======
+    if ($postAction === 'delete_type') {
+        $typeId = intval($_POST['id'] ?? 0);
+        $type = $pdo->prepare("SELECT * FROM reward_punish_types WHERE id = ?");
+        $type->execute([$typeId]);
+        $type = $type->fetch();
+        if (!$type) { http_response_code(404); die("类型不存在喵"); }
+        if ($type['is_builtin']) { http_response_code(403); die("内置类型不可删除喵"); }
+        $check = $pdo->prepare("SELECT COUNT(*) FROM score_records WHERE type_id = ?");
+        $check->execute([$typeId]);
+        if ($check->fetchColumn() > 0) { http_response_code(409); die("该类型已被用于积分记录，无法删除喵"); }
+        $pdo->prepare("DELETE FROM reward_punish_types WHERE id = ?")->execute([$typeId]);
+        logAction('删除奖惩类型喵', 'type', $typeId, $type['name']);
+        echo "删除成功喵";
+        exit;
+    }
+
     // 添加班级
     if ($postAction === 'add_class') {
         $grade_id = $_POST['grade_id'] ?? null;
         $name = trim($_POST['class_name'] ?? '');
         $leader = trim($_POST['class_leader'] ?? '');
         if (empty($grade_id) || empty($name)) { http_response_code(400); die("请填写完整信息喵"); }
-        if ($_SESSION['role'] === 'grade_admin' && $grade_id != $_SESSION['grade_id']) { http_response_code(403); die("权限不足喵"); }
         $pdo->prepare("INSERT INTO classes (grade_id, name, class_leader) VALUES (?,?,?)")->execute([$grade_id, $name, $leader]);
         logAction('添加班级喵', 'class', $pdo->lastInsertId(), $name);
         echo "班级添加成功喵";
@@ -578,17 +668,13 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             $gradeStmt->execute([$gradeName]);
             $grade = $gradeStmt->fetch();
             if (!$grade) {
-                $errors[] = "第{$line}行：年级 '{$gradeName}' 不存在";
-                continue;
-            }
-            if ($_SESSION['role'] === 'grade_admin' && $grade['id'] != $_SESSION['grade_id']) {
-                $errors[] = "第{$line}行：无权限导入其他年级";
+                $errors[] = "第{$line}行：年级 '".htmlspecialchars($gradeName, ENT_QUOTES)."' 不存在";
                 continue;
             }
             $check = $pdo->prepare("SELECT id FROM classes WHERE grade_id = ? AND name = ?");
             $check->execute([$grade['id'], $className]);
             if ($check->fetch()) {
-                $errors[] = "第{$line}行：{$gradeName} {$className} 已存在";
+                $errors[] = "第{$line}行：".htmlspecialchars($gradeName, ENT_QUOTES)." ".htmlspecialchars($className, ENT_QUOTES)." 已存在";
                 continue;
             }
             $pdo->prepare("INSERT INTO classes (grade_id, name, class_leader) VALUES (?,?,?)")->execute([$grade['id'], $className, $leader]);
@@ -600,8 +686,9 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         exit;
     }
 
-    // 恢复备份
-    if ($postAction === 'restore' && $_SESSION['role'] === 'super_admin') {
+    // 恢复备份（加强校验）
+    if ($postAction === 'restore') {
+        if (!isSuperAdmin()) { http_response_code(403); die("权限不足喵，仅超级管理员可恢复备份"); }
         if ($_FILES['backup_file']['error'] !== UPLOAD_ERR_OK) {
             http_response_code(400);
             die("文件上传失败喵");
@@ -630,18 +717,20 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             http_response_code(400);
             die("备份文件为空喵");
         }
-        // 检查是否包含典型的 SQL 语句关键字
         $upperHeader = strtoupper(substr(trim($header), 0, 200));
-        if (strpos($upperHeader, 'CREATE TABLE') === false 
+        if (strpos($upperHeader, 'CREATE TABLE') === false
             && strpos($upperHeader, 'INSERT INTO') === false
-            && strpos($upperHeader, '--') === false) {
+            && strpos($upperHeader, '--') === false
+            && strpos($upperHeader, 'ALTER TABLE') === false) {
             http_response_code(400);
             die("文件格式无效，不是有效的 SQL 备份文件喵");
         }
 
-        // 校验4：禁止危险操作
+        // 校验4：禁止危险操作（扩展关键字）
         $upperFull = strtoupper(file_get_contents($fileTmp));
-        $dangerous = ['DROP DATABASE', 'DROP SCHEMA', 'TRUNCATE'];
+        $dangerous = ['DROP DATABASE', 'DROP SCHEMA', 'TRUNCATE', 'DELETE FROM mysql',
+                       'DROP TABLE mysql', 'CREATE USER', 'ALTER USER', 'REVOKE',
+                       'SHUTDOWN', 'LOAD_FILE', 'INTO OUTFILE', 'INTO DUMPFILE'];
         foreach ($dangerous as $keyword) {
             if (strpos($upperFull, $keyword) !== false) {
                 http_response_code(400);
@@ -649,27 +738,98 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             }
         }
 
-        // 执行恢复
+        // 校验5：SQL 语句逐条执行，单条失败可追踪
         try {
             $sql = file_get_contents($fileTmp);
-            $pdo->exec($sql);
-            logAction('恢复数据库备份喵');
-            echo "恢复成功喵";
+            // 分号拆分（简单拆分，跳过字符串中的分号）
+            $statements = [];
+            $inSingle = false;
+            $inDouble = false;
+            $current = '';
+            for ($i = 0; $i < strlen($sql); $i++) {
+                $ch = $sql[$i];
+                if ($ch === "'" && ($i === 0 || $sql[$i-1] !== "\\")) $inSingle = !$inSingle;
+                if ($ch === '"' && ($i === 0 || $sql[$i-1] !== "\\")) $inDouble = !$inDouble;
+                if ($ch === ';' && !$inSingle && !$inDouble) {
+                    $stmt = trim($current);
+                    if ($stmt !== '') $statements[] = $stmt;
+                    $current = '';
+                } else {
+                    $current .= $ch;
+                }
+            }
+            $remain = trim($current);
+            if ($remain !== '') $statements[] = $remain;
+
+            $executed = 0;
+            foreach ($statements as $st) {
+                $st = trim($st);
+                if ($st === '' || strpos($st, '--') === 0 || strpos($st, '/*') === 0) continue;
+                $pdo->exec($st);
+                $executed++;
+            }
+            logAction('恢复数据库备份喵', null, null, "执行{$executed}条语句");
+            echo "恢复成功喵，共执行 {$executed} 条语句。";
         } catch (PDOException $e) {
             http_response_code(500);
             error_log("备份恢复失败: " . $e->getMessage());
-            die("恢复失败：SQL 执行出错喵。请检查备份文件完整性。");
+            die("恢复失败喵：SQL 执行出错，请检查备份文件完整性喵。");
+        }
+        exit;
+    }
+
+    // 确认启用 TOTP
+    if ($postAction === 'totp_enable' && isset($_SESSION['admin_id'])) {
+        header('Content-Type: application/json; charset=utf-8');
+        $code = $_POST['code'] ?? '';
+        $secret = $_SESSION['pending_totp_secret'] ?? '';
+        if (empty($secret) || empty($code)) {
+            echo json_encode(['success' => false, 'message' => '参数错误喵']);
+            exit;
+        }
+        if (!preg_match('/^\d{6}$/', $code)) {
+            echo json_encode(['success' => false, 'message' => '验证码格式错误喵']);
+            exit;
+        }
+        if (verifyTotp($secret, $code)) {
+            $pdo->prepare("UPDATE admins SET totp_secret = ? WHERE id = ?")->execute([$secret, $_SESSION['admin_id']]);
+            unset($_SESSION['pending_totp_secret']);
+            logAction('启用二次验证喵');
+            echo json_encode(['success' => true, 'message' => '二次验证已启用喵']);
+        } else {
+            echo json_encode(['success' => false, 'message' => '验证码错误，请重试喵']);
+        }
+        exit;
+    }
+
+    // 禁用 TOTP
+    if ($postAction === 'totp_disable' && isset($_SESSION['admin_id'])) {
+        header('Content-Type: application/json; charset=utf-8');
+        $password = $_POST['password'] ?? '';
+        if (empty($password)) {
+            echo json_encode(['success' => false, 'message' => '请输入当前密码喵']);
+            exit;
+        }
+        $stmt = $pdo->prepare("SELECT password_hash FROM admins WHERE id = ?");
+        $stmt->execute([$_SESSION['admin_id']]);
+        $admin = $stmt->fetch();
+        if ($admin && password_verify($password, $admin['password_hash'])) {
+            $pdo->prepare("UPDATE admins SET totp_secret = NULL WHERE id = ?")->execute([$_SESSION['admin_id']]);
+            logAction('禁用二次验证喵');
+            echo json_encode(['success' => true, 'message' => '二次验证已禁用喵']);
+        } else {
+            echo json_encode(['success' => false, 'message' => '密码错误喵']);
         }
         exit;
     }
 }
 
-// =================== GET 数据处理 ===================
+// =================== GET 数据处理（只读接口，不做写操作）===================
 
-// 获取积分记录
+// 获取积分记录（image_path 转义修复）
 if ($action === 'get_records') {
     $currentSemester = getCurrentSemester();
-    if (!$currentSemester) { echo "<p>暂无当前学期数据喵</p>"; exit; }
+    if (!$currentSemester) { echo "<p>暂无当前学期数据</p>"; exit; }
 
     $classId = $_GET['class_id'] ?? '';
     $sql = "SELECT sr.id, sr.points, sr.created_at, sr.note, sr.image_path,
@@ -684,88 +844,114 @@ if ($action === 'get_records') {
         $sql .= " AND sr.class_id = ?";
         $params[] = $classId;
     }
-    if (isset($_SESSION['role']) && $_SESSION['role'] === 'grade_admin') {
-        $sql .= " AND c.grade_id = ?";
-        $params[] = $_SESSION['grade_id'];
-    }
     $sql .= " ORDER BY sr.created_at DESC LIMIT 100";
 
     $stmt = $pdo->prepare($sql);
     $stmt->execute($params);
     $records = $stmt->fetchAll();
 
-    $isAdmin = isset($_SESSION['role']) && in_array($_SESSION['role'], ['super_admin', 'grade_admin']);
-    echo "<table style='width:100%'><tr><th>班级喵</th><th>类型喵</th><th>分值喵</th><th>时间喵</th><th>备注喵</th><th>附件喵</th>" . ($isAdmin ? "<th>操作喵</th>" : "") . "</tr>";
+    $isScoreAdmin = !isGuest() && canOperateScore();
+    echo "<table class='responsive-card' style='width:100%'><thead><tr><th>班级</th><th>类型</th><th>分值</th><th>时间</th><th>备注</th><th>附件</th>" . ($isScoreAdmin ? "<th>操作</th>" : "") . "</tr></thead><tbody>";
     foreach ($records as $r) {
+        // image_path XSS 修复：所有用户可控/数据库字段均 HTML 转义
+        $safeImg = htmlspecialchars($r['image_path'] ?? '', ENT_QUOTES, 'UTF-8');
+        $attachHtml = !empty($r['image_path'])
+            ? "<a href='{$safeImg}' target='_blank' rel='noopener'><img src='{$safeImg}' style='max-width:60px; max-height:40px; border-radius:4px;' alt='截图'></a>"
+            : '—';
+        $actionHtml = $isScoreAdmin ? "<button class='btn-sm btn-delete' onclick='deleteRecord({$r['id']})'>撤回</button>" : '';
         echo "<tr>
-                <td>{$r['grade_name']}{$r['class_name']}</td>
-                <td>{$r['type_name']}</td>
-                <td>{$r['points']}</td>
-                <td>{$r['created_at']}</td>
-                <td>".htmlspecialchars($r['note'] ?? '')."</td>
-                <td>";
-        if (!empty($r['image_path'])) {
-            echo "<a href='{$r['image_path']}' target='_blank'><img src='{$r['image_path']}' style='max-width:60px; max-height:40px; border-radius:4px;' alt='截图'></a>";
-        } else {
-            echo "—";
-        }
-        echo "</td>";
-        if ($isAdmin) {
-            echo "<td><button class='btn-sm btn-delete' onclick='deleteRecord({$r['id']})'>撤回喵</button></td>";
-        }
-        echo "</tr>";
+                <td data-label='班级'>".htmlspecialchars($r['grade_name'].$r['class_name'], ENT_QUOTES)."</td>
+                <td data-label='类型'>".htmlspecialchars($r['type_name'], ENT_QUOTES)."</td>
+                <td data-label='分值'>".htmlspecialchars($r['points'], ENT_QUOTES)."</td>
+                <td data-label='时间'>".htmlspecialchars($r['created_at'], ENT_QUOTES)."</td>
+                <td data-label='备注'>".htmlspecialchars($r['note'] ?? '', ENT_QUOTES)."</td>
+                <td data-label='附件'>{$attachHtml}</td>" .
+                ($isScoreAdmin ? "<td data-label='操作'>{$actionHtml}</td>" : "") .
+              "</tr>";
     }
-    echo "</table>";
+    echo "</tbody></table>";
     exit;
 }
 
-// 排行榜（自然周修正）别乱动，这个板块非常玄学
+// 排行榜（MySQL 8.0+ 使用 CTE 优化查询，5.7 回退原生 JOIN）
 if ($action === 'ranking') {
     $currentSemester = getCurrentSemester();
-    if (!$currentSemester) { echo "<p>暂无当前学期数据喵</p>"; exit; }
+    if (!$currentSemester) { echo "<p>暂无当前学期数据</p>"; exit; }
 
     $period = $_GET['period'] ?? 'week';
     $gradeId = $_GET['grade_id'] ?? '';
+    $useCTE = function_exists('isMySQL80') && isMySQL80();
 
-    $sql = "SELECT c.id, c.name AS class_name, g.name AS grade_name, SUM(sr.points) AS total, c.is_frozen
-            FROM score_records sr
-            JOIN classes c ON sr.class_id = c.id
-            JOIN grades g ON c.grade_id = g.id
-            WHERE sr.semester_id = ?";
-    $params = [$currentSemester['id']];
-
-    if ($period === 'week') {
-        // 计算本周一的日期
-        $tz = new DateTimeZone('Asia/Shanghai');
-        $now = new DateTime('now', $tz);
-        $weekMonday = clone $now;
-        $dayOfWeek = (int)$now->format('N');
-        if ($dayOfWeek > 1) {
-            $weekMonday->modify('-' . ($dayOfWeek - 1) . ' days');
+    if ($useCTE) {
+        // MySQL 8.0+：CTE 先聚合过滤后的积分，再 JOIN 班级信息，逻辑更清晰
+        $cteFilter = '';
+        $cteParams = [$currentSemester['id']];
+        if ($period === 'week') {
+            $tz = new DateTimeZone('Asia/Shanghai');
+            $now = new DateTime('now', $tz);
+            $weekMonday = clone $now;
+            $dayOfWeek = (int)$now->format('N');
+            if ($dayOfWeek > 1) $weekMonday->modify('-' . ($dayOfWeek - 1) . ' days');
+            $weekMonday->setTime(0, 0, 0);
+            $weekSunday = clone $weekMonday;
+            $weekSunday->modify('+6 days')->setTime(23, 59, 59);
+            $cteFilter = " AND sr.created_at BETWEEN ? AND ?";
+            $cteParams[] = $weekMonday->format('Y-m-d H:i:s');
+            $cteParams[] = $weekSunday->format('Y-m-d H:i:s');
+        } elseif ($period === 'month') {
+            $currentMonth = getMonthNumber($currentSemester['start_date']);
+            list($monthStart, $monthEnd) = getMonthDateRange($currentSemester['start_date'], $currentMonth);
+            $cteFilter = " AND sr.created_at BETWEEN ? AND ?";
+            $cteParams[] = $monthStart->format('Y-m-d H:i:s');
+            $cteParams[] = $monthEnd->format('Y-m-d H:i:s');
         }
-        $weekMonday->setTime(0, 0, 0);
-        $weekSunday = clone $weekMonday;
-        $weekSunday->modify('+6 days')->setTime(23, 59, 59);
 
-        $sql .= " AND sr.created_at BETWEEN ? AND ?";
-        $params[] = $weekMonday->format('Y-m-d H:i:s');
-        $params[] = $weekSunday->format('Y-m-d H:i:s');
-    } elseif ($period === 'month') {
-        // 月榜仍使用 month_number
-        $month = ceil((time() - strtotime($currentSemester['start_date'])) / (30*24*3600));
-        $sql .= " AND sr.month_number = ?";
-        $params[] = $month;
+        $sql = "WITH filtered_scores AS (
+                    SELECT sr.class_id, SUM(sr.points) AS total
+                    FROM score_records sr
+                    WHERE sr.semester_id = ?{$cteFilter}
+                    GROUP BY sr.class_id
+                )
+                SELECT c.id, c.name AS class_name, g.name AS grade_name, COALESCE(fs.total, 0) AS total, c.is_frozen
+                FROM classes c
+                JOIN grades g ON c.grade_id = g.id
+                LEFT JOIN filtered_scores fs ON fs.class_id = c.id";
+        $params = $cteParams;
+    } else {
+        // MySQL 5.7：原生 JOIN 聚合
+        $sql = "SELECT c.id, c.name AS class_name, g.name AS grade_name, COALESCE(SUM(sr.points), 0) AS total, c.is_frozen
+                FROM classes c
+                JOIN grades g ON c.grade_id = g.id
+                LEFT JOIN score_records sr ON sr.class_id = c.id AND sr.semester_id = ?";
+        $params = [$currentSemester['id']];
+
+        if ($period === 'week') {
+            $tz = new DateTimeZone('Asia/Shanghai');
+            $now = new DateTime('now', $tz);
+            $weekMonday = clone $now;
+            $dayOfWeek = (int)$now->format('N');
+            if ($dayOfWeek > 1) $weekMonday->modify('-' . ($dayOfWeek - 1) . ' days');
+            $weekMonday->setTime(0, 0, 0);
+            $weekSunday = clone $weekMonday;
+            $weekSunday->modify('+6 days')->setTime(23, 59, 59);
+            $sql .= " AND sr.created_at BETWEEN ? AND ?";
+            $params[] = $weekMonday->format('Y-m-d H:i:s');
+            $params[] = $weekSunday->format('Y-m-d H:i:s');
+        } elseif ($period === 'month') {
+            $currentMonth = getMonthNumber($currentSemester['start_date']);
+            list($monthStart, $monthEnd) = getMonthDateRange($currentSemester['start_date'], $currentMonth);
+            $sql .= " AND sr.created_at BETWEEN ? AND ?";
+            $params[] = $monthStart->format('Y-m-d H:i:s');
+            $params[] = $monthEnd->format('Y-m-d H:i:s');
+        }
     }
 
     if ($gradeId) {
         $sql .= " AND g.id = ?";
         $params[] = $gradeId;
     }
-    if (isset($_SESSION['role']) && $_SESSION['role'] === 'grade_admin') {
-        $sql .= " AND g.id = ?";
-        $params[] = $_SESSION['grade_id'];
-    }
-    $sql .= " GROUP BY c.id ORDER BY total DESC";
+
+    $sql .= " GROUP BY c.id, c.name, g.name, c.is_frozen ORDER BY total DESC";
 
     $stmt = $pdo->prepare($sql);
     $stmt->execute($params);
@@ -774,20 +960,21 @@ if ($action === 'ranking') {
     echo "<ol class='ranking-list'>";
     foreach ($ranking as $r) {
         $frozen = !empty($r['is_frozen']) ? '❄️' : '';
-        echo "<li><span>{$r['grade_name']} {$r['class_name']} $frozen</span><strong>{$r['total']} 分喵</strong></li>";
+        $name = htmlspecialchars($r['grade_name'] . ' ' . $r['class_name'], ENT_QUOTES);
+        echo "<li><span>{$name} {$frozen}</span><strong>".htmlspecialchars($r['total'], ENT_QUOTES)." 分</strong></li>";
     }
     echo "</ol>";
     exit;
 }
 
-// 导出积分明细
-if ($action === 'export_records' && isset($_SESSION['admin_id']) && in_array($_SESSION['role'], ['super_admin', 'grade_admin'])) {
+// 导出积分明细（CSV 全部字段用 csvEscape 安全转义）
+if ($action === 'export_records' && !isGuest() && canOperateScore()) {
     $currentSemester = getCurrentSemester();
-    if (!$currentSemester) die("无当前学期喵");
+    if (!$currentSemester) die("无当前学期");
 
     $classId = $_GET['class_id'] ?? '';
     $sql = "SELECT g.name AS grade_name, c.name AS class_name, t.name AS type_name,
-                   CASE t.type WHEN 'punish' THEN '惩罚喵' ELSE '奖励喵' END AS type_category,
+                   CASE t.type WHEN 'punish' THEN '惩罚' ELSE '奖励' END AS type_category,
                    sr.points, sr.created_at, sr.note, sr.image_path
             FROM score_records sr
             JOIN classes c ON sr.class_id = c.id
@@ -799,10 +986,6 @@ if ($action === 'export_records' && isset($_SESSION['admin_id']) && in_array($_S
         $sql .= " AND sr.class_id = ?";
         $params[] = $classId;
     }
-    if ($_SESSION['role'] === 'grade_admin') {
-        $sql .= " AND c.grade_id = ?";
-        $params[] = $_SESSION['grade_id'];
-    }
     $sql .= " ORDER BY sr.created_at DESC";
     $stmt = $pdo->prepare($sql);
     $stmt->execute($params);
@@ -811,21 +994,27 @@ if ($action === 'export_records' && isset($_SESSION['admin_id']) && in_array($_S
     header('Content-Type: application/vnd.ms-excel; charset=utf-8');
     header('Content-Disposition: attachment; filename="score_records_'.date('YmdHis').'.csv"');
     echo "\xEF\xBB\xBF";
-    echo "年级喵,班级喵,奖惩类型喵,类别喵,分值喵,时间喵,备注喵,图片路径喵\n";
+    echo implode(',', array_map('csvEscape', ['年级','班级','奖惩类型','类别','分值','时间','备注','图片路径'])) . "\n";
     foreach ($records as $r) {
-        $time = $r['created_at'];
-        $note = str_replace('"', '""', $r['note'] ?? '');
-        $image = $r['image_path'] ?? '';
-        echo "{$r['grade_name']},{$r['class_name']},{$r['type_name']},{$r['type_category']},{$r['points']},{$time},\"{$note}\",{$image}\n";
+        echo implode(',', [
+            csvEscape($r['grade_name']),
+            csvEscape($r['class_name']),
+            csvEscape($r['type_name']),
+            csvEscape($r['type_category']),
+            csvEscape($r['points']),
+            csvEscape($r['created_at']),
+            csvEscape($r['note'] ?? ''),
+            csvEscape($r['image_path'] ?? ''),
+        ]) . "\n";
     }
     logAction('导出积分记录明细喵');
     exit;
 }
 
-// 导出积分汇总（班级总分）
-if ($action === 'export_scores' && isset($_SESSION['admin_id']) && in_array($_SESSION['role'], ['super_admin', 'grade_admin'])) {
+// 导出积分汇总（班级总分）（CSV 全部字段用 csvEscape）
+if ($action === 'export_scores' && !isGuest() && canOperateScore()) {
     $currentSemester = getCurrentSemester();
-    if (!$currentSemester) die("无当前学期喵");
+    if (!$currentSemester) die("无当前学期");
 
     $sql = "SELECT g.name AS grade_name, c.name AS class_name, c.class_leader, c.is_frozen,
                    COALESCE(SUM(sr.points), 0) AS total
@@ -834,10 +1023,6 @@ if ($action === 'export_scores' && isset($_SESSION['admin_id']) && in_array($_SE
             LEFT JOIN score_records sr ON sr.class_id = c.id AND sr.semester_id = ?
             WHERE 1=1";
     $params = [$currentSemester['id']];
-    if ($_SESSION['role'] === 'grade_admin') {
-        $sql .= " AND c.grade_id = ?";
-        $params[] = $_SESSION['grade_id'];
-    }
     $sql .= " GROUP BY c.id ORDER BY g.name, c.name";
     $stmt = $pdo->prepare($sql);
     $stmt->execute($params);
@@ -846,181 +1031,102 @@ if ($action === 'export_scores' && isset($_SESSION['admin_id']) && in_array($_SE
     header('Content-Type: application/vnd.ms-excel; charset=utf-8');
     header('Content-Disposition: attachment; filename="class_scores_'.date('YmdHis').'.csv"');
     echo "\xEF\xBB\xBF";
-    echo "年级喵,班级喵,负责人喵,积分喵,状态喵\n";
+    echo implode(',', array_map('csvEscape', ['年级','班级','负责人','积分','状态'])) . "\n";
     foreach ($data as $row) {
-        $status = $row['is_frozen'] ? '已冻结喵' : '正常喵';
-        echo "{$row['grade_name']},{$row['class_name']},".htmlspecialchars($row['class_leader']??'').",{$row['total']},{$status}\n";
+        $status = $row['is_frozen'] ? '已冻结' : '正常';
+        echo implode(',', [
+            csvEscape($row['grade_name']),
+            csvEscape($row['class_name']),
+            csvEscape($row['class_leader'] ?? ''),
+            csvEscape($row['total']),
+            csvEscape($status),
+        ]) . "\n";
     }
     logAction('导出班级积分喵');
     exit;
 }
 
-// 获取学期列表
+// 获取学期列表（设为当前 改为 POST，这里渲染按钮改成 form POST 提交）
 if ($action === 'get_semesters') {
+    $canSetCurrent = isSuperAdmin();
     $semesters = $pdo->query("SELECT * FROM semesters ORDER BY start_date DESC")->fetchAll();
     foreach ($semesters as $s) {
         $current = $s['is_current'] ? ' ✅ 当前喵' : '';
-        echo "<div style='padding:0.5rem 0; border-bottom:1px solid #eee;'>
-                {$s['name']} ({$s['start_date']} ~ {$s['end_date']}) $current
-                <a href='api.php?action=set_current&id={$s['id']}' style='margin-left:1rem;'>设为当前喵</a>
+        $setBtn = '';
+        if (!$s['is_current'] && $canSetCurrent) {
+            $setBtn = "<form style='display:inline;' method='post' onsubmit='event.preventDefault(); apiPost(\"set_current_semester\", {id: {$s['id']}}).then(r=>r.text()).then(m=>{alert(m);loadSemesters();});'>
+                        <input type='hidden' name='csrf_token' value='".generateCsrfToken()."'>
+                        <button type='submit' class='btn-sm btn-green'>设为当前喵</button>
+                       </form>";
+        }
+        echo "<div class='semester-row'>
+                <span class='semester-info'>" . htmlspecialchars($s['name']) . " (" . htmlspecialchars($s['start_date']) . " ~ " . htmlspecialchars($s['end_date']) . ") {$current}</span>
+                {$setBtn}
               </div>";
     }
     exit;
 }
 
-// 设置当前学期
-if ($action === 'set_current' && isset($_SESSION['admin_id']) && $_SESSION['role'] === 'super_admin') {
-    $id = intval($_GET['id'] ?? 0);
-    $pdo->exec("UPDATE semesters SET is_current = 0");
-    $pdo->prepare("UPDATE semesters SET is_current = 1 WHERE id = ?")->execute([$id]);
-    logAction('切换当前学期喵', 'semester', $id);
-    echo "已切换当前学期，请刷新页面喵。";
-    exit;
-}
-
-// 获取班级列表（管理）
-if ($action === 'get_classes' && isset($_SESSION['admin_id']) && in_array($_SESSION['role'], ['super_admin', 'grade_admin'])) {
-    if ($_SESSION['role'] === 'super_admin') {
-        $stmt = $pdo->query("SELECT c.*, g.name AS grade_name FROM classes c JOIN grades g ON c.grade_id = g.id ORDER BY g.id, c.name");
-    } else {
-        $stmt = $pdo->prepare("SELECT c.*, g.name AS grade_name FROM classes c JOIN grades g ON c.grade_id = g.id WHERE c.grade_id = ? ORDER BY c.name");
-        $stmt->execute([$_SESSION['grade_id']]);
-    }
+// 获取班级列表（管理）（冻结/解冻/删除改为 POST 提交）
+if ($action === 'get_classes' && !isGuest() && canOperateSystem()) {
+    $stmt = $pdo->query("SELECT c.*, g.name AS grade_name FROM classes c JOIN grades g ON c.grade_id = g.id ORDER BY g.id, c.name");
     $classes = $stmt->fetchAll();
-    echo "<table style='width:100%'><tr><th>年级喵</th><th>班级喵</th><th>负责人喵</th><th>状态喵</th><th>操作喵</th></tr>";
+    echo "<table class='responsive-card' style='width:100%'><thead><tr><th>年级</th><th>班级</th><th>负责人</th><th>状态</th><th>操作</th></tr></thead><tbody>";
     foreach ($classes as $c) {
-        $frozenLabel = $c['is_frozen'] ? '❄️已冻结喵' : '✅正常喵';
+        $frozenLabel = $c['is_frozen'] ? '❄️已冻结' : '✅正常';
         $freezeBtn = $c['is_frozen']
-            ? "<button class='btn-sm btn-green' onclick='unfreezeClass({$c['id']})'>解冻喵</button>"
-            : "<button class='btn-sm btn-red' onclick='freezeClass({$c['id']})'>冻结喵</button>";
+            ? "<form style='display:inline;' onsubmit='event.preventDefault(); apiPost(\"unfreeze_class\", {id: {$c['id']}}).then(r=>r.text()).then(m=>{alert(m);loadClasses();}); return false;'>
+                 <button class='btn-sm btn-green' type='submit'>解冻</button></form>"
+            : "<form style='display:inline;' onsubmit='event.preventDefault(); apiPost(\"freeze_class\", {id: {$c['id']}}).then(r=>r.text()).then(m=>{alert(m);loadClasses();}); return false;'>
+                 <button class='btn-sm btn-red' type='submit'>冻结</button></form>";
+        $delBtn = "<form style='display:inline;' onsubmit='event.preventDefault(); if(!confirm(\"确定删除该班级喵？相关积分记录将一并删除喵！\")) return false; apiPost(\"delete_class\", {id: {$c['id']}}).then(r=>r.text()).then(m=>{alert(m);loadClasses();}); return false;'>
+                     <button class='btn-sm btn-delete' type='submit'>删除</button></form>";
         echo "<tr>
-                <td>{$c['grade_name']}</td>
-                <td>{$c['name']}</td>
-                <td>".htmlspecialchars($c['class_leader']??'—')."</td>
-                <td>{$frozenLabel}</td>
-                <td>
-                    <button class='btn-sm btn-delete' onclick='deleteClass({$c['id']})'>删除喵</button>
-                    {$freezeBtn}
-                </td>
+                <td data-label='年级'>".htmlspecialchars($c['grade_name'], ENT_QUOTES)."</td>
+                <td data-label='班级'>".htmlspecialchars($c['name'], ENT_QUOTES)."</td>
+                <td data-label='负责人'>".htmlspecialchars($c['class_leader'] ?? '—', ENT_QUOTES)."</td>
+                <td data-label='状态'>{$frozenLabel}</td>
+                <td data-label='操作'>{$delBtn} {$freezeBtn}</td>
               </tr>";
     }
-    echo "</table>";
+    echo "</tbody></table>";
     exit;
 }
 
-// 删除班级
-if ($action === 'delete_class' && isset($_SESSION['admin_id']) && in_array($_SESSION['role'], ['super_admin', 'grade_admin'])) {
-    $classId = intval($_GET['id'] ?? 0);
-    $class = $pdo->prepare("SELECT * FROM classes WHERE id = ?");
-    $class->execute([$classId]);
-    $class = $class->fetch();
-    if (!$class) { http_response_code(404); die("班级不存在喵"); }
-    if ($_SESSION['role'] === 'grade_admin' && $class['grade_id'] != $_SESSION['grade_id']) { http_response_code(403); die("权限不足喵"); }
-    $pdo->prepare("DELETE FROM classes WHERE id = ?")->execute([$classId]);
-    logAction('删除班级喵', 'class', $classId, $class['name']);
-    echo "班级已删除喵";
-    exit;
-}
-
-// 获取奖惩类型列表
-if ($action === 'get_types' && isset($_SESSION['admin_id']) && in_array($_SESSION['role'], ['super_admin', 'grade_admin'])) {
+// 获取奖惩类型列表（删除改为 POST）
+if ($action === 'get_types' && !isGuest() && canOperateSystem()) {
     $types = $pdo->query("SELECT * FROM reward_punish_types ORDER BY type, category, name")->fetchAll();
-    echo "<table style='width:100%'><tr><th>分类喵</th><th>名称喵</th><th>类别喵</th><th>默认分值喵</th><th>操作喵</th></tr>";
+    echo "<table class='responsive-card' style='width:100%'><thead><tr><th>分类</th><th>名称</th><th>类别</th><th>默认分值</th><th>操作</th></tr></thead><tbody>";
     foreach ($types as $t) {
-        $catLabel = $t['type'] == 'punish' ? '惩罚喵' : '奖励喵';
-        $category = htmlspecialchars($t['category'] ?? '—');
+        $catLabel = $t['type'] == 'punish' ? '惩罚' : '奖励';
+        $category = htmlspecialchars($t['category'] ?? '—', ENT_QUOTES);
         $disabled = $t['is_builtin'] ? 'disabled' : '';
+        $delBtn = $t['is_builtin']
+            ? "<span style='color:#94a3b8; font-size:0.75rem;'>内置</span>"
+            : "<form style='display:inline;' onsubmit='event.preventDefault(); if(!confirm(\"确定删除该类型喵？若已用于积分记录则无法删除喵。\")) return false; apiPost(\"delete_type\", {id: {$t['id']}}).then(r=>r.text()).then(m=>{alert(m);loadTypes();}); return false;'>
+                 <button class='btn-sm btn-delete' type='submit' {$disabled}>删除</button></form>";
         echo "<tr>
-                <td>{$category}</td>
-                <td>".htmlspecialchars($t['name'])."</td>
-                <td>{$catLabel}</td>
-                <td>{$t['default_points']}</td>
-                <td><button class='btn-sm btn-delete' onclick='deleteType({$t['id']})' {$disabled}>删除喵</button></td>
+                <td data-label='分类'>{$category}</td>
+                <td data-label='名称'>".htmlspecialchars($t['name'], ENT_QUOTES)."</td>
+                <td data-label='类别'>{$catLabel}</td>
+                <td data-label='默认分值'>".htmlspecialchars($t['default_points'], ENT_QUOTES)."</td>
+                <td data-label='操作'>{$delBtn}</td>
               </tr>";
     }
-    echo "</table>";
+    echo "</tbody></table>";
     exit;
 }
 
-// 删除奖惩类型
-if ($action === 'delete_type' && isset($_SESSION['admin_id']) && in_array($_SESSION['role'], ['super_admin', 'grade_admin'])) {
-    $typeId = intval($_GET['id'] ?? 0);
-    $type = $pdo->prepare("SELECT * FROM reward_punish_types WHERE id = ?");
-    $type->execute([$typeId]);
-    $type = $type->fetch();
-    if (!$type) { http_response_code(404); die("类型不存在喵"); }
-    if ($type['is_builtin']) { http_response_code(403); die("内置类型不可删除喵"); }
-    $check = $pdo->prepare("SELECT COUNT(*) FROM score_records WHERE type_id = ?");
-    $check->execute([$typeId]);
-    if ($check->fetchColumn() > 0) { http_response_code(409); die("该类型已被用于积分记录，无法删除喵"); }
-    $pdo->prepare("DELETE FROM reward_punish_types WHERE id = ?")->execute([$typeId]);
-    logAction('删除奖惩类型喵', 'type', $typeId, $type['name']);
-    echo "删除成功喵";
-    exit;
-}
-
-// 冻结班级
-if ($action === 'freeze_class' && isset($_SESSION['admin_id']) && in_array($_SESSION['role'], ['super_admin', 'grade_admin'])) {
-    $classId = intval($_GET['id'] ?? 0);
-    $class = $pdo->prepare("SELECT * FROM classes WHERE id = ?");
-    $class->execute([$classId]);
-    $class = $class->fetch();
-    if (!$class) { http_response_code(404); die("班级不存在喵"); }
-    if ($_SESSION['role'] === 'grade_admin' && $class['grade_id'] != $_SESSION['grade_id']) { http_response_code(403); die("权限不足喵"); }
-
-    $pdo->prepare("UPDATE classes SET is_frozen = 1 WHERE id = ?")->execute([$classId]);
-    logAction('冻结班级喵', 'class', $classId, $class['name']);
-    echo "班级已冻结喵";
-    exit;
-}
-
-// 解冻班级
-if ($action === 'unfreeze_class' && isset($_SESSION['admin_id']) && in_array($_SESSION['role'], ['super_admin', 'grade_admin'])) {
-    $classId = intval($_GET['id'] ?? 0);
-    $class = $pdo->prepare("SELECT * FROM classes WHERE id = ?");
-    $class->execute([$classId]);
-    $class = $class->fetch();
-    if (!$class) { http_response_code(404); die("班级不存在喵"); }
-    if ($_SESSION['role'] === 'grade_admin' && $class['grade_id'] != $_SESSION['grade_id']) { http_response_code(403); die("权限不足喵"); }
-
-    $pdo->prepare("UPDATE classes SET is_frozen = 0 WHERE id = ?")->execute([$classId]);
-    logAction('解冻班级喵', 'class', $classId, $class['name']);
-    echo "班级已解冻喵";
-    exit;
-}
-
-// 获取密保问题（忘记密码用）
-if ($action === 'get_security_question') {
-    header('Content-Type: application/json; charset=utf-8');
-    $username = $_GET['username'] ?? '';
-    if (empty($username)) {
-        echo json_encode(['error' => '请输入用户名']);
-        exit;
-    }
-    try {
-        $stmt = $pdo->prepare("SELECT security_question FROM admins WHERE username = ? AND security_question IS NOT NULL");
-        $stmt->execute([$username]);
-        $row = $stmt->fetch();
-        if ($row) {
-            echo json_encode(['question' => $row['security_question']]);
-        } else {
-            echo json_encode(['error' => '该用户不存在或未设置密保问题']);
-        }
-    } catch (PDOException $e) {
-        echo json_encode(['error' => '查询失败']);
-    }
-    exit;
-}
+// 密保问题查询接口已移除：防止未登录用户枚举任意账户的密保问题（安全加固）
+// 忘记密码请使用 install.php?action=reset 的密保验证流程喵
 
 // =================== TOTP 二次验证接口 ===================
 
-// 获取 TOTP 设置信息（生成新密钥+URI）
-if ($action === 'totp_setup_info' && isset($_SESSION['admin_id'])) {
+if ($action === 'totp_setup_info' && !isGuest()) {
     header('Content-Type: application/json; charset=utf-8');
     $username = $_SESSION['username'];
     $secret = generateTotpSecret();
     $uri = generateTotpUri($secret, $username);
-    // 暂存到 session 以便确认时使用
     $_SESSION['pending_totp_secret'] = $secret;
     echo json_encode([
         'secret' => $secret,
@@ -1030,55 +1136,7 @@ if ($action === 'totp_setup_info' && isset($_SESSION['admin_id'])) {
     exit;
 }
 
-// 确认启用 TOTP（验证当前动态码）
-$postAction = $_POST['action'] ?? '';
-if ($postAction === 'totp_enable' && isset($_SESSION['admin_id'])) {
-    header('Content-Type: application/json; charset=utf-8');
-    $code = $_POST['code'] ?? '';
-    $secret = $_SESSION['pending_totp_secret'] ?? '';
-    if (empty($secret) || empty($code)) {
-        echo json_encode(['success' => false, 'message' => '参数错误喵']);
-        exit;
-    }
-    if (!preg_match('/^\d{6}$/', $code)) {
-        echo json_encode(['success' => false, 'message' => '验证码格式错误喵']);
-        exit;
-    }
-    if (verifyTotp($secret, $code)) {
-        $pdo->prepare("UPDATE admins SET totp_secret = ? WHERE id = ?")->execute([$secret, $_SESSION['admin_id']]);
-        unset($_SESSION['pending_totp_secret']);
-        logAction('启用二次验证喵');
-        echo json_encode(['success' => true, 'message' => '二次验证已启用喵']);
-    } else {
-        echo json_encode(['success' => false, 'message' => '验证码错误，请重试喵']);
-    }
-    exit;
-}
-
-// 禁用 TOTP（需验证当前密码）
-$postAction = $_POST['action'] ?? '';
-if ($postAction === 'totp_disable' && isset($_SESSION['admin_id'])) {
-    header('Content-Type: application/json; charset=utf-8');
-    $password = $_POST['password'] ?? '';
-    if (empty($password)) {
-        echo json_encode(['success' => false, 'message' => '请输入当前密码喵']);
-        exit;
-    }
-    $stmt = $pdo->prepare("SELECT password_hash FROM admins WHERE id = ?");
-    $stmt->execute([$_SESSION['admin_id']]);
-    $admin = $stmt->fetch();
-    if ($admin && password_verify($password, $admin['password_hash'])) {
-        $pdo->prepare("UPDATE admins SET totp_secret = NULL WHERE id = ?")->execute([$_SESSION['admin_id']]);
-        logAction('禁用二次验证喵');
-        echo json_encode(['success' => true, 'message' => '二次验证已禁用喵']);
-    } else {
-        echo json_encode(['success' => false, 'message' => '密码错误喵']);
-    }
-    exit;
-}
-
-// 获取 TOTP 状态
-if ($action === 'totp_status' && isset($_SESSION['admin_id'])) {
+if ($action === 'totp_status' && !isGuest()) {
     header('Content-Type: application/json; charset=utf-8');
     $stmt = $pdo->prepare("SELECT totp_secret FROM admins WHERE id = ?");
     $stmt->execute([$_SESSION['admin_id']]);
@@ -1086,3 +1144,73 @@ if ($action === 'totp_status' && isset($_SESSION['admin_id'])) {
     echo json_encode(['enabled' => !empty($admin['totp_secret'])]);
     exit;
 }
+
+// 获取管理员列表（用于日志过滤下拉）
+if ($action === 'get_admins') {
+    header('Content-Type: text/html; charset=utf-8');
+    $rows = $pdo->query("SELECT id, username FROM admins ORDER BY username")->fetchAll();
+    foreach ($rows as $r) {
+        echo "<option value=\"{$r['id']}\">" . htmlspecialchars($r['username'], ENT_QUOTES) . "</option>";
+    }
+    exit;
+}
+
+// 获取操作日志
+if ($action === 'get_logs' && !isGuest() && canOperateSystem()) {
+    $adminId = $_GET['admin_id'] ?? '';
+    $keyword = $_GET['keyword'] ?? '';
+    $dateFrom = $_GET['date_from'] ?? '';
+    $dateTo = $_GET['date_to'] ?? '';
+
+    $sql = "SELECT l.*, a.username FROM admin_logs l JOIN admins a ON l.admin_id = a.id WHERE 1=1";
+    $params = [];
+
+    if ($adminId) {
+        $sql .= " AND l.admin_id = ?";
+        $params[] = intval($adminId);
+    }
+    if ($keyword) {
+        $sql .= " AND l.action LIKE ?";
+        $params[] = '%' . $keyword . '%';
+    }
+    if ($dateFrom) {
+        $sql .= " AND l.created_at >= ?";
+        $params[] = $dateFrom . ' 00:00:00';
+    }
+    if ($dateTo) {
+        $sql .= " AND l.created_at <= ?";
+        $params[] = $dateTo . ' 23:59:59';
+    }
+
+    $sql .= " ORDER BY l.created_at DESC LIMIT 200";
+    $stmt = $pdo->prepare($sql);
+    $stmt->execute($params);
+    $logs = $stmt->fetchAll();
+
+    if (empty($logs)) {
+        echo '<p style="color:#94a3b8;text-align:center;padding:1rem;">暂无操作日志</p>';
+        exit;
+    }
+
+    echo '<div class="table-wrap"><table class="responsive-card" style="width:100%;font-size:0.85rem;">';
+    echo '<thead><tr><th>时间</th><th>管理员</th><th>操作</th><th>类型</th><th>详情</th><th>IP</th></tr></thead><tbody>';
+    foreach ($logs as $log) {
+        $time = htmlspecialchars($log['created_at'], ENT_QUOTES);
+        $user = htmlspecialchars($log['username'], ENT_QUOTES);
+        $action = htmlspecialchars($log['action'], ENT_QUOTES);
+        $targetType = htmlspecialchars($log['target_type'] ?? '—', ENT_QUOTES);
+        $details = htmlspecialchars($log['details'] ?? '—', ENT_QUOTES);
+        $ip = htmlspecialchars($log['ip'] ?? '—', ENT_QUOTES);
+        echo "<tr>
+                <td data-label='时间' style='white-space:nowrap;'>{$time}</td>
+                <td data-label='管理员'>{$user}</td>
+                <td data-label='操作'>{$action}</td>
+                <td data-label='类型'>{$targetType}</td>
+                <td data-label='详情' style='max-width:260px;word-break:break-all;'>{$details}</td>
+                <td data-label='IP' style='font-size:0.75rem;color:#64748b;'>{$ip}</td>
+              </tr>";
+    }
+    echo '</tbody></table></div>';
+    exit;
+}
+?>

@@ -4,7 +4,7 @@ document.addEventListener('DOMContentLoaded', function () {
     if (!tabs.length || !content) return;
 
     function loadTab(tabName) {
-        fetch('api.php?action=get_tab&tab=' + tabName)
+        fetch('api.php?tab=' + tabName)
             .then(function (res) { return res.text(); })
             .then(function (html) {
                 content.innerHTML = '';
@@ -25,11 +25,13 @@ document.addEventListener('DOMContentLoaded', function () {
                     }
                 }
 
-                // 如果加载的是快捷操作 Tab，初始化小类下拉框
+                // 如果加载的是快捷操作 Tab，初始化小类下拉框（无学期时仅显示提示，跳过初始化喵）
                 if (tabName === 'quick' && typeof switchTypeCategory === 'function') {
-                    // 默认大类为"惩罚"
-                    document.getElementById('type-category').value = 'punish';
-                    switchTypeCategory();
+                    var typeCategory = document.getElementById('type-category');
+                    if (typeCategory) {
+                        typeCategory.value = 'punish';
+                        switchTypeCategory();
+                    }
                 }
             })
             .catch(function () {

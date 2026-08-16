@@ -1,107 +1,99 @@
 <?php
 require_once 'config.php';
 requireLogin();
-if ($_SESSION['role'] !== 'super_admin') {
+// 仅超级管理员可访问
+if (!canManageUsers()) {
     http_response_code(403);
     die("权限不足喵，仅超级管理员可访问喵");
 }
 
 $message = '';
+$superAdminCount = getSuperAdminCount();
 
-// 处理添加管理员
+// ========== 添加管理员（POST + CSRF） ==========
 if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['add_user'])) {
-    // CSRF 验证
-    $csrfToken = $_POST['csrf_token'] ?? '';
-    if (empty($_SESSION['csrf_token']) || !hash_equals($_SESSION['csrf_token'], $csrfToken)) {
-        $message = "CSRF 验证失败喵，请刷新页面后重试喵";
-    } else {
+    validateCsrf();
     $username = trim($_POST['username'] ?? '');
     $password = $_POST['password'] ?? '';
     $role = $_POST['role'] ?? '';
-    $grade_id = $_POST['grade_id'] ?? null;
-    $class_id = $_POST['class_id'] ?? null;
+    $securityQuestion = $_POST['security_question'] ?? '';
+    $securityAnswer = $_POST['security_answer'] ?? '';
 
-    // 验证密码强度
+    // 密码强度
     if (strlen($password) < 8 || !preg_match('/[a-z]/', $password) || !preg_match('/[A-Z]/', $password) || !preg_match('/[0-9]/', $password)) {
         $message = "密码至少8位喵，包含大小写字母和数字喵";
-    } elseif (!in_array($role, ['super_admin', 'grade_admin', 'class_teacher'])) {
+    } elseif (!in_array($role, ['super_admin', 'system_admin', 'score_admin'])) {
         $message = "无效的角色喵";
+    } elseif ($role === 'super_admin' && $superAdminCount >= 1) {
+        $message = "超级管理员只能存在一个喵，无法新增喵";
     } else {
-        // 检查用户名唯一性
         $check = $pdo->prepare("SELECT id FROM admins WHERE username = ?");
         $check->execute([$username]);
         if ($check->fetch()) {
             $message = "用户名已存在喵";
         } else {
-            // 根据角色设置 grade_id / class_id
-            if ($role === 'grade_admin') {
-                $class_id = null;
-            } elseif ($role === 'class_teacher') {
-                $grade_id = null;
-            } elseif ($role === 'super_admin') {
-                $grade_id = $class_id = null;
-            }
-
             $hash = password_hash($password, PASSWORD_DEFAULT);
-            $stmt = $pdo->prepare("INSERT INTO admins (username, password_hash, role, grade_id, class_id) VALUES (?, ?, ?, ?, ?)");
-            $stmt->execute([$username, $hash, $role, $grade_id ?: null, $class_id ?: null]);
-            logAction('添加管理员喵', 'admin', $pdo->lastInsertId(), $username);
+            $answerHash = null;
+            if (!empty($securityQuestion) && !empty($securityAnswer)) {
+                $answerHash = password_hash($securityAnswer, PASSWORD_DEFAULT);
+            }
+            $stmt = $pdo->prepare("INSERT INTO admins (username, password_hash, role, security_question, security_answer_hash) VALUES (?,?,?,?,?)");
+            $stmt->execute([$username, $hash, $role, $securityQuestion ?: null, $answerHash]);
+            $newId = $pdo->lastInsertId();
+            logAction('添加管理员喵', 'admin', $newId, "角色:{$role} 用户名:{$username}");
             $message = "管理员添加成功喵";
+            $superAdminCount = getSuperAdminCount();
         }
     }
-    } // end CSRF else
 }
 
-// 处理删除管理员
-if (isset($_GET['delete'])) {
-    $deleteId = intval($_GET['delete']);
-    if ($deleteId == $_SESSION['admin_id']) {
+// ========== 删除管理员（POST + CSRF + 超级管理员唯一性保护） ==========
+if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['delete_user'])) {
+    validateCsrf();
+    $deleteId = intval($_POST['delete_id'] ?? 0);
+    if ($deleteId <= 0) {
+        $message = "参数错误喵";
+    } elseif ($deleteId == $_SESSION['admin_id']) {
         $message = "不能删除自己喵";
     } else {
-        // 检查要删除的用户是否为最高管理员 admin
-        $checkAdmin = $pdo->prepare("SELECT username FROM admins WHERE id = ?");
-        $checkAdmin->execute([$deleteId]);
-        $deleteUser = $checkAdmin->fetch();
-        if ($deleteUser && $deleteUser['username'] === 'admin') {
-            $message = "admin 为最高管理员喵，不可删除喵";
+        $stmt = $pdo->prepare("SELECT role, username FROM admins WHERE id = ?");
+        $stmt->execute([$deleteId]);
+        $target = $stmt->fetch();
+        if (!$target) {
+            $message = "目标用户不存在喵";
+        } elseif ($target['role'] === 'super_admin') {
+            $message = "超级管理员不可删除喵";
         } else {
-            $stmt = $pdo->prepare("DELETE FROM admins WHERE id = ?");
-            $stmt->execute([$deleteId]);
-            logAction('删除管理员喵', 'admin', $deleteId);
+            $pdo->prepare("DELETE FROM admins WHERE id = ?")->execute([$deleteId]);
+            logAction('删除管理员喵', 'admin', $deleteId, "原用户名:{$target['username']}");
             $message = "管理员已删除喵";
         }
     }
 }
 
 // 获取所有管理员
-$admins = $pdo->query("SELECT a.*, g.name AS grade_name, c.name AS class_name 
-                       FROM admins a 
-                       LEFT JOIN grades g ON a.grade_id = g.id 
-                       LEFT JOIN classes c ON a.class_id = c.id 
-                       ORDER BY a.role, a.username")->fetchAll();
-
-// 获取年级和班级列表，用于表单下拉
-$grades = $pdo->query("SELECT * FROM grades")->fetchAll();
-$classes = $pdo->query("SELECT c.*, g.name AS grade_name FROM classes c JOIN grades g ON c.grade_id = g.id ORDER BY g.id, c.name")->fetchAll();
+$admins = $pdo->query("SELECT * FROM admins ORDER BY FIELD(role, 'super_admin','system_admin','score_admin'), username")->fetchAll();
+$securityQuestions = getSecurityQuestions();
 ?>
 <!DOCTYPE html>
 <html lang="zh-CN">
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=yes">
-    <title>管理员账户管理喵</title>
+    <title>管理员账户管理</title>
     <link rel="icon" type="image/x-icon" href="favicon.ico">
     <link rel="shortcut icon" type="image/x-icon" href="favicon.ico">
     <link rel="stylesheet" href="style.css">
     <style>
-        .admin-container { max-width: 900px; margin: 1rem auto; padding: 0 1rem; }
+        .admin-container { max-width: 950px; margin: 1rem auto; padding: 0 1rem; }
         .message { background: #e0f2fe; color: #075985; padding: 0.8rem; border-radius: 0.8rem; margin-bottom: 1rem; }
         .message.error { background: #fee2e2; color: #b91c1c; }
         form .row { display: flex; gap: 0.5rem; flex-wrap: wrap; align-items: flex-end; margin-bottom: 0.8rem; }
-        form .row > div { flex: 1; min-width: 150px; }
+        form .row > div { flex: 1; min-width: 180px; }
         label { display: block; font-size: 0.85rem; margin-bottom: 0.2rem; }
-        select, input { width: 100%; padding: 0.5rem; border: 1px solid #cbd5e1; border-radius: 0.5rem; }
+        select, input { width: 100%; padding: 0.5rem; border: 1px solid #cbd5e1; border-radius: 0.5rem; box-sizing: border-box; }
         .table-wrap { overflow-x: auto; margin-top: 1rem; }
+        .hint { font-size: 0.75rem; color: #64748b; margin-top: 0.2rem; }
     </style>
 </head>
 <body>
@@ -124,36 +116,36 @@ $classes = $pdo->query("SELECT c.*, g.name AS grade_name FROM classes c JOIN gra
                 </div>
                 <div>
                     <label>密码喵</label>
-                    <input type="password" name="password" required placeholder="至少8位喵，含大小写字母+数字喵">
+                    <input type="password" name="password" required placeholder="至少8位，大小写字母+数字">
+                </div>
+                <div>
+                    <label>角色喵</label>
+                    <select name="role" id="role-select" required>
+                        <option value="">-- 选择角色 --</option>
+                        <option value="score_admin">普通积分管理员（管理全年级积分业务）</option>
+                        <option value="system_admin">系统管理员（运维 + 积分应急权限）</option>
+                        <?php if ($superAdminCount === 0): ?>
+                            <option value="super_admin">超级管理员（唯一root）</option>
+                        <?php endif; ?>
+                    </select>
+                    <?php if ($superAdminCount > 0): ?>
+                        <div class="hint">超级管理员已存在，无法新增喵</div>
+                    <?php endif; ?>
                 </div>
             </div>
             <div class="row">
                 <div>
-                    <label>角色喵</label>
-                    <select name="role" id="role-select" required>
-                        <option value="">-- 选择角色喵 --</option>
-                        <option value="super_admin">超级管理员喵</option>
-                        <option value="grade_admin">年级管理员喵</option>
-                        <option value="class_teacher">班主任喵</option>
-                    </select>
-                </div>
-                <div id="grade-field" style="display:none;">
-                    <label>年级喵</label>
-                    <select name="grade_id">
-                        <option value="">-- 选择年级喵 --</option>
-                        <?php foreach ($grades as $g): ?>
-                            <option value="<?= $g['id'] ?>"><?= htmlspecialchars($g['name']) ?></option>
+                    <label>密保问题（可选，用于忘记密码）</label>
+                    <select name="security_question">
+                        <option value="">-- 不设置 --</option>
+                        <?php foreach ($securityQuestions as $q): ?>
+                            <option value="<?= htmlspecialchars($q, ENT_QUOTES) ?>"><?= htmlspecialchars($q) ?></option>
                         <?php endforeach; ?>
                     </select>
                 </div>
-                <div id="class-field" style="display:none;">
-                    <label>班级喵</label>
-                    <select name="class_id">
-                        <option value="">-- 选择班级喵 --</option>
-                        <?php foreach ($classes as $c): ?>
-                            <option value="<?= $c['id'] ?>"><?= htmlspecialchars($c['grade_name'].' '.$c['name']) ?></option>
-                        <?php endforeach; ?>
-                    </select>
+                <div>
+                    <label>密保答案</label>
+                    <input type="text" name="security_answer" placeholder="填写密保问题答案">
                 </div>
             </div>
             <button type="submit" name="add_user" class="btn">添加管理员喵</button>
@@ -166,48 +158,54 @@ $classes = $pdo->query("SELECT c.*, g.name AS grade_name FROM classes c JOIN gra
             <table>
                 <thead>
                     <tr>
-                        <th>用户名喵</th>
-                        <th>角色喵</th>
-                        <th>关联年级/班级喵</th>
-                        <th>状态喵</th>
-                        <th>操作喵</th>
+                        <th>用户名</th>
+                        <th>角色</th>
+                        <th>密保</th>
+                        <th>二次验证</th>
+                        <th>状态</th>
+                        <th>操作</th>
                     </tr>
                 </thead>
                 <tbody>
                     <?php foreach ($admins as $admin): ?>
-                        <?php $isAdminUser = ($admin['username'] === 'admin'); ?>
+                        <?php $isSuper = ($admin['role'] === 'super_admin'); ?>
                         <tr>
-                            <td><?= htmlspecialchars($admin['username']) ?><?= $isAdminUser ? ' 👑' : '' ?></td>
+                            <td><?= htmlspecialchars($admin['username']) ?><?= $isSuper ? ' 👑' : '' ?></td>
                             <td>
                                 <?php
-                                $roleNames = ['super_admin' => '超级管理员喵', 'grade_admin' => '年级管理员喵', 'class_teacher' => '班主任喵'];
-                                echo $roleNames[$admin['role']] ?? $admin['role'];
+                                $roleNames = [
+                                    'super_admin'  => '超级管理员（root）',
+                                    'system_admin' => '系统管理员',
+                                    'score_admin'  => '普通积分管理员',
+                                    'grade_admin'  => '年级管理员（待迁移）',
+                                    'class_teacher'=> '班主任（待迁移）',
+                                ];
+                                echo htmlspecialchars($roleNames[$admin['role']] ?? $admin['role']);
+                                if ($isSuper) {
+                                    echo "<span style='display:inline-block;background:#fef3c7;color:#92400e;font-size:0.7rem;padding:0.1rem 0.4rem;border-radius:0.5rem;margin-left:0.3rem;'>唯一 / 不可删除</span>";
+                                }
                                 ?>
-                                <?php if ($isAdminUser): ?>
-                                    <span style="display:inline-block;background:#fef3c7;color:#92400e;font-size:0.7rem;padding:0.1rem 0.4rem;border-radius:0.5rem;margin-left:0.3rem;">最高管理员</span>
-                                <?php endif; ?>
                             </td>
-                            <td>
-                                <?php
-                                if ($admin['grade_name']) echo htmlspecialchars($admin['grade_name']);
-                                if ($admin['class_name']) echo htmlspecialchars($admin['class_name']);
-                                if (!$admin['grade_name'] && !$admin['class_name']) echo '—';
-                                ?>
-                            </td>
+                            <td><?= !empty($admin['security_question']) ? '<span style="color:#16a34a;">已设置</span>' : '<span style="color:#94a3b8;">未设置</span>' ?></td>
+                            <td><?= !empty($admin['totp_secret']) ? '<span style="color:#16a34a;">已启用</span>' : '<span style="color:#94a3b8;">未启用</span>' ?></td>
                             <td>
                                 <?php if ($admin['lock_until'] && strtotime($admin['lock_until']) > time()): ?>
-                                    <span style="color:#ef4444;">锁定中喵</span>
+                                    <span style="color:#ef4444;">锁定中</span>
                                 <?php else: ?>
-                                    <span style="color:#15803d;">正常喵</span>
+                                    <span style="color:#15803d;">正常</span>
                                 <?php endif; ?>
                             </td>
                             <td>
-                                <?php if ($isAdminUser): ?>
-                                    <span style="color:#92400e;font-size:0.8rem;background:#fef3c7;padding:0.2rem 0.5rem;border-radius:0.5rem;">🔒 不可删除喵</span>
+                                <?php if ($isSuper): ?>
+                                    <span style="color:#92400e;font-size:0.8rem;background:#fef3c7;padding:0.2rem 0.5rem;border-radius:0.5rem;">🔒 不可删除</span>
                                 <?php elseif ($admin['id'] != $_SESSION['admin_id']): ?>
-                                    <a href="?delete=<?= $admin['id'] ?>" class="btn-sm btn-delete" onclick="return confirm('确定删除该管理员喵？')">删除喵</a>
+                                    <form method="post" style="display:inline;" onsubmit="return confirm('确定删除该管理员喵？');">
+                                        <?= csrfField() ?>
+                                        <input type="hidden" name="delete_id" value="<?= $admin['id'] ?>">
+                                        <button type="submit" name="delete_user" class="btn-sm btn-delete">删除</button>
+                                    </form>
                                 <?php else: ?>
-                                    <span style="color:#94a3b8;">当前用户喵</span>
+                                    <span style="color:#94a3b8;">当前用户</span>
                                 <?php endif; ?>
                             </td>
                         </tr>
@@ -217,20 +215,5 @@ $classes = $pdo->query("SELECT c.*, g.name AS grade_name FROM classes c JOIN gra
         </div>
     </div>
 </div>
-
-<script>
-    const roleSelect = document.getElementById('role-select');
-    const gradeField = document.getElementById('grade-field');
-    const classField = document.getElementById('class-field');
-
-    function toggleFields() {
-        const role = roleSelect.value;
-        gradeField.style.display = (role === 'grade_admin') ? 'block' : 'none';
-        classField.style.display = (role === 'class_teacher') ? 'block' : 'none';
-    }
-    roleSelect.addEventListener('change', toggleFields);
-    // 初始化
-    toggleFields();
-</script>
 </body>
 </html>
